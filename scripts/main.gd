@@ -10,6 +10,12 @@ const Audio = preload("res://scripts/audio.gd")
 const FishCard = preload("res://scripts/fish_card.gd")
 const InfoCard = preload("res://scripts/info_card.gd")
 const HelpCard = preload("res://scripts/help_card.gd")
+const FishList = preload("res://scripts/fish_list.gd")
+const BACKUP_DIR := "user://backups"
+const BACKUP_KEEP := 10
+const BACKUP_EVERY := 900.0        # seconds between automatic backups
+const RUN_KEY := "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run"
+const MONTHS := ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 const SAVE_PATH := "user://fishy_save.json"
 const AUTOSAVE_SECONDS := 30.0
 const WIDGET_SIZES := {
@@ -34,6 +40,7 @@ var lifetime := 0.0
 var unlocked := 1                 # highest species index shown in the shop
 var upgrades := {}
 var tips_seen := {}
+var stats := {}
 
 var settings := Settings.new()
 var audio
@@ -65,6 +72,9 @@ var fish_card
 var info_card
 var help_card
 var help_button: Button
+var fish_list
+var fish_list_button: Button
+var fish_section_label: Label
 var tip_box: PanelContainer
 var tip_label: Label
 var tray: StatusIndicator
@@ -87,6 +97,7 @@ var _undo_time := 0.0
 var _tip_time := 0.0
 var _tip_cooldown := 3.0
 var _prev_volume := 60
+var _backup_t := 0.0
 var _afford_normal: StyleBoxFlat
 var _afford_hover: StyleBoxFlat
 var _floating_labels: Array = []   # labels that need a backing when transparent
@@ -99,6 +110,8 @@ func _ready() -> void:
 	for k in Data.UPGRADES:
 		upgrades[k] = 0
 	settings.load_file()
+	settings.values.autostart = _autostart_enabled()
+	stats = _default_stats()
 	font = SystemFont.new()
 	font.font_names = PackedStringArray(["Cascadia Mono", "Consolas", "Lucida Console", "Courier New", "monospace"])
 	theme = _build_theme()
@@ -117,11 +130,19 @@ func _ready() -> void:
 		_apply_upgrades()
 		tank.add_fish(0, 0, 0, 0.3)
 		_say("Welcome! Click the water to feed your fish. Esc for settings.")
+	_backup_save("start")
 	_refresh()
 
 
 func _process(dt: float) -> void:
 	_play_time += dt
+	stats.play_seconds += dt
+	stats.best_money = maxf(stats.best_money, money)
+	_backup_t += dt
+	if _backup_t >= BACKUP_EVERY:
+		_backup_t = 0.0
+		_save_game()
+		_backup_save("auto")
 	_msg_time -= dt
 	_undo_time -= dt
 	_tip_cooldown -= dt
@@ -185,6 +206,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	if k == KEY_ESCAPE:
 		if help_card.visible:
 			help_card.hide()
+		elif fish_list.visible:
+			fish_list.hide()
 		elif fish_card.visible:
 			fish_card.close()
 		elif info_card.visible:
@@ -195,7 +218,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			_toggle_settings()
 	elif k == KEY_F1 or event.unicode == 63:      # F1 or "?"
 		_toggle_help()
-	elif settings_panel.visible or fish_card.visible or info_card.visible or help_card.visible:
+	elif settings_panel.visible or fish_card.visible or info_card.visible or help_card.visible or fish_list.visible:
 		handled = false
 	elif k == KEY_Z and event.ctrl_pressed:
 		_undo_sell()
@@ -210,17 +233,36 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			_say("No coins to collect right now.")
 	elif k == KEY_M:
 		_toggle_mute()
+	elif k == KEY_L:
+		_toggle_fish_list()
+	elif k == KEY_P:
+		_set_setting("on_top", not settings.values.on_top)
+		_say("Pinned on top." if settings.values.on_top else "Unpinned.")
+	elif k == KEY_C:
+		_set_setting("layout", "full" if compact else "compact")
 	else:
 		handled = false
 	if handled:
 		get_viewport().set_input_as_handled()
 
 
+# F drops a pellet above every hungry fish. If nobody is hungry, it drops
+# one at the mouse (or somewhere at the top) like a click would.
 func _feed_key() -> void:
-	if tank.mouse_in_tank():
-		tank.drop_food(tank.mouse_cell - Vector2(0.5, 0.5))
+	var fed := 0
+	for f in tank.fishes:
+		if f.hunger > 0.35 and fed < 12:
+			tank.drop_food(Vector2(f.pos.x + f.w * 0.5, maxf(2.0, f.pos.y - 1.0)))
+			fed += 1
+	if fed == 0:
+		if tank.mouse_in_tank():
+			tank.drop_food(tank.mouse_cell - Vector2(0.5, 0.5))
+		else:
+			tank.drop_food(Vector2(randf_range(2.0, tank.cols - 3.0), 2.0))
+		fed = 1
 	else:
-		tank.drop_food(Vector2(randf_range(2.0, tank.cols - 3.0), 2.0))
+		_say("Fed %d hungry fish." % fed if fed > 1 else "Fed a hungry fish.")
+	stats.food += fed
 	audio.play("food")
 
 
@@ -273,37 +315,60 @@ func _apply_upgrades() -> void:
 	tank.set_weeds(2 + upgrades.weed)
 
 
+# Hold Shift to buy as many as you can afford (and have room for).
 func _buy_fish(i: int) -> void:
-	if i < 0 or i >= Data.SPECIES.size():
+	if i < 0 or i >= Data.SPECIES.size() or i > unlocked:
 		return
-	var cost := fish_cost(i)
-	if i > unlocked or money < cost:
+	var many := Input.is_key_pressed(KEY_SHIFT)
+	var n := 0
+	while true:
+		var cost := fish_cost(i)
+		if money < cost:
+			break
+		if tank.fishes.size() >= capacity():
+			if n == 0:
+				_say("The tank is full! Buy a bigger tank or sell a fish.")
+			break
+		money -= cost
+		tank.add_fish(i, 0, 0, 0.3, true)
+		n += 1
+		if not many:
+			break
+	if n == 0:
 		return
-	if tank.fishes.size() >= capacity():
-		_say("The tank is full! Buy a bigger tank or sell a fish.")
-		return
-	money -= cost
-	tank.add_fish(i, 0, 0, 0.3, true)
 	unlocked = max(unlocked, min(i + 1, Data.SPECIES.size() - 1))
+	stats.fish_bought += n
 	audio.play("buy")
-	_say("A new %s %s splashes in!" % [Data.SPECIES[i].name, Data.SPECIES[i].icon])
+	var sp: Dictionary = Data.SPECIES[i]
+	if n == 1:
+		_say("A new %s %s splashes in!" % [sp.name, sp.icon])
+	else:
+		_say("%d new %s %s splash in!" % [n, sp.name, sp.icon])
 	_save_game()
 	_refresh()
 
 
 func _buy_upgrade(key: String) -> void:
-	var lv: int = upgrades[key]
 	var u: Dictionary = Data.UPGRADES[key]
-	if lv >= int(u.max):
+	var many := Input.is_key_pressed(KEY_SHIFT)
+	var n := 0
+	while int(upgrades[key]) < int(u.max):
+		var cost := Data.upgrade_cost(key, upgrades[key])
+		if money < cost:
+			break
+		money -= cost
+		upgrades[key] += 1
+		n += 1
+		if not many:
+			break
+	if n == 0:
 		return
-	var cost := Data.upgrade_cost(key, lv)
-	if money < cost:
-		return
-	money -= cost
-	upgrades[key] = lv + 1
 	_apply_upgrades()
 	audio.play("buy")
-	_say("Bought %s (level %d)." % [u.name, lv + 1])
+	if n == 1:
+		_say("Bought %s (level %d)." % [u.name, upgrades[key]])
+	else:
+		_say("Bought %d levels of %s (now level %d)." % [n, u.name, upgrades[key]])
 	_save_game()
 	_refresh()
 
@@ -320,6 +385,7 @@ func _sell_fish(f) -> void:
 		"n": f.nickname, "pos": f.pos, "value": v, "title": fish_title(f)}
 	_undo_time = UNDO_SECONDS
 	money += v
+	stats.fish_sold += 1
 	tank.remove_fish(f)
 	audio.play("sell")
 	_say("Sold %s for $%s." % [fish_title(f), Data.fmt(v)])
@@ -337,6 +403,7 @@ func _undo_sell() -> void:
 		_say("Can't undo: the tank is full.")
 		return
 	money -= _undo.value
+	stats.fish_sold -= 1
 	var f = tank.add_fish(_undo.s, _undo.lv, _undo.xp, _undo.hg)
 	f.nickname = _undo.n
 	f.pos = _undo.pos
@@ -349,9 +416,15 @@ func _undo_sell() -> void:
 	_refresh()
 
 
-func _on_money(amount: float) -> void:
+func _on_money(amount: float, coins: int, by_snail: bool) -> void:
 	money += amount
 	lifetime += amount
+	if by_snail:
+		stats.earned_snails += amount
+		stats.coins_snails += coins
+	else:
+		stats.earned_you += amount
+		stats.coins_you += coins
 
 
 # What to save up for: the cheapest thing in the shop you can't afford yet.
@@ -566,7 +639,21 @@ func _build_ui() -> void:
 	shop_box = VBoxContainer.new()
 	shop_box.add_theme_constant_override("separation", 6)
 	main_vb.add_child(shop_box)
-	shop_box.add_child(_section_label("FISH  (keys 1-6)"))
+	# A flow container, so the button drops under the label in narrow windows.
+	var fish_head := HFlowContainer.new()
+	fish_head.add_theme_constant_override("h_separation", 6)
+	fish_head.add_theme_constant_override("v_separation", 4)
+	fish_section_label = _section_label("FISH  (keys 1-6, Shift = buy max)")
+	fish_section_label.tooltip_text = "Keys 1-6 buy fish. Hold Shift to buy as many as you can afford."
+	fish_section_label.mouse_filter = Control.MOUSE_FILTER_PASS
+	fish_head.add_child(fish_section_label)
+	var head_space := Control.new()
+	head_space.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	fish_head.add_child(head_space)
+	fish_list_button = _make_button("Fish list (L)", _toggle_fish_list)
+	fish_list_button.tooltip_text = "Every fish in your tank, with level and hunger."
+	fish_head.add_child(fish_list_button)
+	shop_box.add_child(fish_head)
 	var fish_flow := HFlowContainer.new()
 	fish_flow.add_theme_constant_override("h_separation", 6)
 	fish_flow.add_theme_constant_override("v_separation", 6)
@@ -636,6 +723,12 @@ func _build_ui() -> void:
 	info_card = InfoCard.new()
 	add_child(info_card)
 
+	fish_list = FishList.new()
+	fish_list.fish_selected.connect(func(f):
+		fish_list.hide()
+		_open_fish_card(f))
+	add_child(fish_list)
+
 	help_card = HelpCard.new()
 	help_card.tips_reset_requested.connect(_reset_tips)
 	add_child(help_card)
@@ -647,6 +740,10 @@ func _build_ui() -> void:
 	settings_panel.reset_requested.connect(_reset_game)
 	settings_panel.closed.connect(func(): settings_panel.visible = false)
 	settings_panel.help_requested.connect(_toggle_help)
+	settings_panel.stats_requested.connect(_show_stats)
+	settings_panel.export_requested.connect(func(): _open_save_dialog(true))
+	settings_panel.import_requested.connect(func(): _open_save_dialog(false))
+	settings_panel.backups_requested.connect(_open_backups)
 	add_child(settings_panel)
 
 
@@ -717,8 +814,15 @@ func _reset_tips() -> void:
 	_say("Tips will show again as you play.")
 
 
+func _toggle_fish_list() -> void:
+	settings_panel.visible = false
+	shop_popup.visible = false
+	fish_list.toggle()
+	_refresh()
+
+
 func _check_tips() -> void:
-	if tip_box.visible or _tip_cooldown > 0.0 or settings_panel.visible or info_card.visible or help_card.visible:
+	if tip_box.visible or _tip_cooldown > 0.0 or settings_panel.visible or info_card.visible or help_card.visible or fish_list.visible:
 		return
 	for id in TIP_ORDER:
 		if tips_seen.has(id):
@@ -766,6 +870,15 @@ func _hide_tip() -> void:
 # ---------------------------------------------------------------- window + settings
 
 func _set_setting(key: String, value) -> void:
+	if key == "autostart":
+		_set_autostart(value)
+		settings.values.autostart = _autostart_enabled()
+		settings_panel.sync(settings.values)
+		if value and not settings.values.autostart:
+			_say("Couldn't turn on Start with Windows.")
+		else:
+			_say("fishy will start with Windows." if value else "fishy won't start with Windows anymore.")
+		return
 	settings.values[key] = value
 	_apply_settings()
 	if key == "widget":
@@ -861,6 +974,8 @@ func _style_for_size(small: bool, scale: float) -> void:
 	settings_button.text = "[=]" if small else "[ = ]"
 	help_button.text = "[?]" if small else "[ ? ]"
 	undo_button.text = "[undo]" if small else "[ undo sell ]"
+	fish_section_label.text = "-- FISH --" if small else "-- FISH  (keys 1-6, Shift = buy max) --"
+	fish_list_button.text = "List (L)" if small else "Fish list (L)"
 	for b in [shop_button, pin_button, help_button, settings_button, min_button, close_button, undo_button]:
 		for state in _compact_btn:
 			if small:
@@ -1045,6 +1160,10 @@ func _quit() -> void:
 
 
 func _reset_game() -> void:
+	_save_game()
+	_backup_save("before-reset")
+	stats = _default_stats()
+	tips_seen.clear()
 	money = Data.START_MONEY
 	lifetime = 0.0
 	unlocked = 1
@@ -1154,6 +1273,11 @@ func _refresh() -> void:
 	elif _msg_time > 0.0:
 		info_label.text = _msg
 		info_label.add_theme_color_override("font_color", Color("9fc7e0"))
+	elif compact:
+		# Small windows have no stats in the top bar, so show them here.
+		info_label.text = "fish %d/%d  ~$%s/s%s" % [tank.fishes.size(), capacity(), rate_txt,
+			"" if goal.is_empty() else "  next: %s $%s" % [goal.name, Data.fmt(goal.cost - money)]]
+		info_label.add_theme_color_override("font_color", Color("6f97b3"))
 	else:
 		info_label.text = ""
 	# Whatever doesn't fit gets "..."; hover the line to read all of it.
@@ -1170,6 +1294,9 @@ func _refresh() -> void:
 			fish_card.update_stats("Level  %s\nFood   [%s%s]\nDrops  $%s every %ss" % [
 				lv_txt, "#".repeat(bars), "-".repeat(10 - bars), Data.fmt(tank.fish_value(cf)),
 				str(Data.SPECIES[cf.species].interval)], "Sell for $%s" % Data.fmt(sell_value(cf)))
+
+	if fish_list.visible:
+		_refresh_fish_list()
 
 	if tip_box.visible:
 		tip_label.custom_minimum_size.x = min(520.0, size.x - (36.0 if compact else 80.0))
@@ -1270,14 +1397,18 @@ func _save_game() -> void:
 		"upgrades": upgrades,
 		"fish": tank.serialize_fish(),
 		"tips": tips_seen.keys(),
+		"stats": stats,
 		"time": Time.get_unix_time_from_system(),
 	}
+	stats.food += tank.player_food
+	tank.player_food = 0
+	data.stats = stats
 	var file := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
 	if file:
 		file.store_string(JSON.stringify(data))
 
 
-func _load_game() -> bool:
+func _load_game(skip_offline := false) -> bool:
 	if not FileAccess.file_exists(SAVE_PATH):
 		return false
 	var d = JSON.parse_string(FileAccess.get_file_as_string(SAVE_PATH))
@@ -1291,6 +1422,11 @@ func _load_game() -> bool:
 		for k in ups:
 			if upgrades.has(k):
 				upgrades[k] = clampi(int(ups[k]), 0, int(Data.UPGRADES[k].max))
+	var st = d.get("stats", null)
+	if typeof(st) == TYPE_DICTIONARY:
+		for k in st:
+			if stats.has(k):
+				stats[k] = st[k]
 	var tips = d.get("tips", null)
 	if typeof(tips) == TYPE_ARRAY:
 		for t in tips:
@@ -1311,7 +1447,9 @@ func _load_game() -> bool:
 		tank.add_fish(0, 0, 0, 0.3)
 
 	var away := Time.get_unix_time_from_system() - float(d.get("time", Time.get_unix_time_from_system()))
-	if away > 30.0:
+	if skip_offline:
+		_say("Save loaded.")
+	elif away > 30.0:
 		_offline_earnings(away)
 	else:
 		_say("Welcome back!")
@@ -1332,6 +1470,7 @@ func _offline_earnings(secs: float) -> void:
 	earned = floor(earned * collect)
 	money += earned
 	lifetime += earned
+	stats.earned_offline += earned
 	if earned <= 0.0:
 		_say("Welcome back! You were away %s." % Data.fmt_time(secs))
 		return
@@ -1343,3 +1482,182 @@ func _offline_earnings(secs: float) -> void:
 	_fit_popups()
 	info_card.open("-- while you were away --", "\n".join(lines))
 	_say("You were away %s. Your fish made $%s." % [Data.fmt_time(secs), Data.fmt(earned)])
+
+
+# ---------------------------------------------------------------- fish list
+
+func _refresh_fish_list() -> void:
+	var sorted: Array = tank.fishes.duplicate()
+	sorted.sort_custom(func(a, b): return tank.fish_value(a) > tank.fish_value(b))
+	var rows := []
+	for f in sorted:
+		var sp: Dictionary = Data.SPECIES[f.species]
+		var bars := int(round((1.0 - f.hunger) * 6.0))
+		var mark := "  !" if f.hunger >= 1.0 else ("  ?" if f.hunger > 0.7 else "")
+		rows.append({
+			"fish": f,
+			"color": sp.color,
+			"text": "%s  %s  lv%s  [%s%s]  $%s%s" % [sp.icon, fish_title(f),
+				"MAX" if f.level >= Data.MAX_LEVEL else str(f.level),
+				"#".repeat(bars), "-".repeat(6 - bars), Data.fmt(tank.fish_value(f)), mark],
+		})
+	fish_list.update_rows("-- your fish  %d/%d --" % [tank.fishes.size(), capacity()], rows)
+
+
+# ---------------------------------------------------------------- stats
+
+func _default_stats() -> Dictionary:
+	return {
+		"earned_you": 0.0, "earned_snails": 0.0, "earned_offline": 0.0,
+		"coins_you": 0, "coins_snails": 0,
+		"fish_bought": 0, "fish_sold": 0, "food": 0,
+		"play_seconds": 0.0, "best_money": 0.0,
+		"started": Time.get_unix_time_from_system(),
+	}
+
+
+func _show_stats() -> void:
+	settings_panel.visible = false
+	var d := Time.get_datetime_dict_from_unix_time(int(stats.started))
+	var best = null
+	for f in tank.fishes:
+		if best == null or f.level > best.level or (f.level == best.level and tank.fish_value(f) > tank.fish_value(best)):
+			best = f
+	var row := func(label: String, value: String) -> String:
+		return label.rpad(15) + value
+	var lines := [
+		row.call("Playing since", "%d %s %d" % [d.day, MONTHS[d.month - 1], d.year]),
+		row.call("Time played", Data.fmt_time(stats.play_seconds)),
+		row.call("Total earned", "$" + Data.fmt(lifetime)),
+		row.call("  by you", "$" + Data.fmt(stats.earned_you)),
+		row.call("  by snails", "$" + Data.fmt(stats.earned_snails)),
+		row.call("  while away", "$" + Data.fmt(stats.earned_offline)),
+		row.call("Coins clicked", str(int(stats.coins_you))),
+		row.call("Snail coins", str(int(stats.coins_snails))),
+		row.call("Most money", "$" + Data.fmt(stats.best_money)),
+		row.call("Fish bought", str(int(stats.fish_bought))),
+		row.call("Fish sold", str(int(stats.fish_sold))),
+		row.call("Food dropped", str(int(stats.food) + tank.player_food)),
+		row.call("Best fish", "" if best == null else "%s, lv %d" % [fish_title(best), best.level]),
+	]
+	_fit_popups()
+	info_card.open("-- stats --", "\n".join(lines), "Close", true)
+
+
+# ---------------------------------------------------------------- backups, export, import
+
+func _backup_save(tag: String) -> void:
+	if not FileAccess.file_exists(SAVE_PATH):
+		return
+	var dir := ProjectSettings.globalize_path(BACKUP_DIR)
+	DirAccess.make_dir_recursive_absolute(dir)
+	# Quick restarts shouldn't push older, more useful backups out of the folder.
+	if tag == "start":
+		for n in DirAccess.get_files_at(dir):
+			var age := Time.get_unix_time_from_system() - FileAccess.get_modified_time("%s/%s" % [dir, n])
+			if age < 600.0:
+				return
+	var stamp := Time.get_datetime_string_from_system().replace(":", "-").replace("T", "_")
+	DirAccess.copy_absolute(ProjectSettings.globalize_path(SAVE_PATH), "%s/save_%s_%s.json" % [dir, stamp, tag])
+	# Keep only the newest few. Names start with the date, so sorting is by age.
+	var files := Array(DirAccess.get_files_at(dir)).filter(func(n): return n.begins_with("save_") and n.ends_with(".json"))
+	files.sort()
+	while files.size() > BACKUP_KEEP:
+		DirAccess.remove_absolute("%s/%s" % [dir, files.pop_front()])
+
+
+func _open_backups() -> void:
+	var dir := ProjectSettings.globalize_path(BACKUP_DIR)
+	DirAccess.make_dir_recursive_absolute(dir)
+	OS.shell_open(dir)
+
+
+func _open_save_dialog(export: bool) -> void:
+	settings_panel.visible = false
+	var dlg := FileDialog.new()
+	dlg.use_native_dialog = true
+	dlg.access = FileDialog.ACCESS_FILESYSTEM
+	dlg.filters = PackedStringArray(["*.json ; fishy save"])
+	if export:
+		dlg.file_mode = FileDialog.FILE_MODE_SAVE_FILE
+		dlg.title = "Export save"
+		var d := Time.get_date_dict_from_system()
+		dlg.current_file = "fishy-save-%04d-%02d-%02d.json" % [d.year, d.month, d.day]
+		dlg.file_selected.connect(export_save)
+	else:
+		dlg.file_mode = FileDialog.FILE_MODE_OPEN_FILE
+		dlg.title = "Import save"
+		DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(BACKUP_DIR))
+		dlg.current_dir = ProjectSettings.globalize_path(BACKUP_DIR)
+		dlg.file_selected.connect(import_save)
+	dlg.file_selected.connect(func(_p): dlg.queue_free())
+	dlg.canceled.connect(dlg.queue_free)
+	add_child(dlg)
+	dlg.popup_centered()
+
+
+func export_save(path: String) -> bool:
+	_save_game()
+	var ok := DirAccess.copy_absolute(ProjectSettings.globalize_path(SAVE_PATH), path) == OK
+	_say(("Exported your save to " + path.get_file()) if ok else "Couldn't export the save there.")
+	return ok
+
+
+func import_save(path: String) -> bool:
+	var text := FileAccess.get_file_as_string(path)
+	var d = JSON.parse_string(text)
+	if typeof(d) != TYPE_DICTIONARY or typeof(d.get("fish", null)) != TYPE_ARRAY or not d.has("money"):
+		_say("That file isn't a fishy save.")
+		return false
+	# Keep the current progress as a backup, then load the chosen one.
+	_save_game()
+	_backup_save("before-import")
+	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
+	if f == null:
+		_say("Couldn't import the save.")
+		return false
+	f.store_string(text)
+	f.close()
+	money = Data.START_MONEY
+	lifetime = 0.0
+	unlocked = 1
+	for k in upgrades:
+		upgrades[k] = 0
+	tips_seen.clear()
+	stats = _default_stats()
+	_undo = {}
+	tank.reset()
+	_load_game(true)
+	_say("Imported " + path.get_file())
+	_refresh()
+	return true
+
+
+# ---------------------------------------------------------------- start with Windows
+
+# Registered under HKCU\...\Run, so it only affects this Windows user.
+func _autostart_command() -> String:
+	var exe := OS.get_executable_path().replace("/", "\\")
+	if OS.has_feature("template"):
+		return "\"%s\"" % exe
+	# Running from the Godot editor binary: point it at this project.
+	var project := ProjectSettings.globalize_path("res://").trim_suffix("/").replace("/", "\\")
+	return "\"%s\" --path \"%s\"" % [exe, project]
+
+
+func _autostart_enabled() -> bool:
+	if OS.get_name() != "Windows":
+		return false
+	return OS.execute("reg", ["query", RUN_KEY, "/v", "fishy"]) == 0
+
+
+func _set_autostart(on: bool) -> void:
+	if OS.get_name() != "Windows":
+		return
+	if on:
+		# reg.exe needs the quotes inside the value escaped, or paths with
+		# spaces (C:\Users\Some Name\...) would break at login.
+		var value := _autostart_command().replace("\"", "\\\"")
+		OS.execute("reg", ["add", RUN_KEY, "/v", "fishy", "/t", "REG_SZ", "/d", value, "/f"])
+	else:
+		OS.execute("reg", ["delete", RUN_KEY, "/v", "fishy", "/f"])

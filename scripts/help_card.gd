@@ -16,13 +16,16 @@ const SECTIONS := [
 		"Click the water: drop food",
 		"Click or drag over $: collect coins",
 		"Right-click a fish (or double-click): its card, to name or sell it",
+		"Shift-click a shop button (or Shift+1-6): buy as many as you can afford",
 		"Drag the top bar, or Alt+drag anywhere: move the window",
 	]],
 	["KEYS", [
 		"Esc  settings        F1  this help",
-		"S    shop            F   drop food",
-		"1-6  buy fish        Space  collect all coins",
+		"S    shop            L   fish list",
+		"1-6  buy fish        F   feed every hungry fish",
+		"Space  collect all coins",
 		"M    mute            Ctrl+Z  undo a sale",
+		"P    pin on top      C   compact / full",
 	]],
 ]
 

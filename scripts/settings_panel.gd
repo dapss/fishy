@@ -7,6 +7,10 @@ signal snap_requested(corner: String)      # "left" | "right"
 signal reset_requested
 signal closed
 signal help_requested
+signal stats_requested
+signal export_requested
+signal import_requested
+signal backups_requested
 
 const LAYOUTS := ["auto", "full", "compact"]
 const LAYOUT_NAMES := ["Auto", "Full", "Compact"]
@@ -28,6 +32,7 @@ var _volume: HSlider
 var _volume_label: Label
 var _eco: CheckButton
 var _tray: CheckButton
+var _autostart: CheckButton
 var _reset_button: Button
 var _reset_armed := 0.0
 var _scroll: ScrollContainer
@@ -109,6 +114,8 @@ func _ready() -> void:
 
 	_eco = _check(vb, "Battery saver", "Drop to 10 FPS while you're using another window.", "eco")
 	_tray = _check(vb, "Keep running when closed", "Closing minimizes instead of quitting, so your fish keep earning. Quit from the tray icon menu.", "tray")
+	_autostart = _check(vb, "Start with Windows", "Open the tank automatically when you log in to Windows.", "autostart")
+	_autostart.visible = OS.get_name() == "Windows"
 
 	_widget = _option(vb, "Widget size", WIDGET_NAMES)
 	_widget.tooltip_text = "Tiny 360x240, Small 460x300, Normal 560x360.\nResizes the window now (keeping it in its corner) and is used by the snap buttons."
@@ -125,10 +132,31 @@ func _ready() -> void:
 	snap.add_child(_button("right", func(): snap_requested.emit("right")))
 	vb.add_child(snap)
 
-	var bottom := HBoxContainer.new()
+	# Save: backups, moving your save to another PC, starting over.
+	var save_label := Label.new()
+	save_label.text = "Save"
+	vb.add_child(save_label)
+	var save_row := HFlowContainer.new()
+	save_row.add_theme_constant_override("h_separation", 6)
+	save_row.add_theme_constant_override("v_separation", 6)
+	var export := _button("Export", func(): export_requested.emit())
+	export.tooltip_text = "Save a copy of your progress anywhere (e.g. to move it to another PC)."
+	save_row.add_child(export)
+	var import := _button("Import", func(): import_requested.emit())
+	import.tooltip_text = "Load progress from an exported save or an automatic backup."
+	save_row.add_child(import)
+	var backups := _button("Backups", func(): backups_requested.emit())
+	backups.tooltip_text = "Open the folder with automatic backups (the last 10 are kept)."
+	save_row.add_child(backups)
 	_reset_button = _button("Reset save...", _on_reset)
 	_reset_button.add_theme_color_override("font_color", Color("ff8a8a"))
-	bottom.add_child(_reset_button)
+	save_row.add_child(_reset_button)
+	vb.add_child(save_row)
+
+	var bottom := HBoxContainer.new()
+	var stats := _button("Stats", func(): stats_requested.emit())
+	stats.tooltip_text = "Totals: coins earned, time played, best fish..."
+	bottom.add_child(stats)
 	var spacer := Control.new()
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	bottom.add_child(spacer)
@@ -177,6 +205,7 @@ func sync(values: Dictionary) -> void:
 	_volume_label.text = _vol_text(int(values.volume))
 	_eco.set_pressed_no_signal(values.eco)
 	_tray.set_pressed_no_signal(values.tray)
+	_autostart.set_pressed_no_signal(values.get("autostart", false))
 	_reset_armed = 0.0
 	_reset_button.text = "Reset save..."
 

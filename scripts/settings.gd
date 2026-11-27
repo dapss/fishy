@@ -14,6 +14,7 @@ const DEFAULTS := {
 	"eco": true,             # drop to a low frame rate while the window isn't focused
 	"widget": "normal",      # tiny | small | normal: size used by "snap widget"
 	"tray": false,           # closing / minimizing hides to the system tray
+	"autostart": false,      # cached; the Windows registry is the real source
 	"win_x": -1,             # -1 = let the OS place the window
 	"win_y": -1,
 	"win_w": 1000,

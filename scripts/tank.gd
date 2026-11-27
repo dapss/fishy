@@ -2,7 +2,7 @@
 # on a character grid (positions are in cells, not pixels).
 extends Control
 
-signal money_earned(amount: float)
+signal money_earned(amount: float, coins: int, by_snail: bool)
 signal fish_opened(fish)              # right-clicked or double-clicked a fish
 signal sfx(sound: String, gain: float)
 
@@ -86,6 +86,7 @@ var coin_mult := 1.0
 var feeder_level := 0
 var has_castle := false
 var transparent_outside := false   # don't paint the area around the glass
+var player_food := 0               # pellets the player dropped (read and reset by stats)
 
 var hovered: Fish = null
 var mouse_cell := Vector2(-100, -100)
@@ -562,7 +563,7 @@ func _fish_at(p: Vector2) -> Fish:
 func _collect(i: int, by_snail := false) -> void:
 	var c: Dictionary = coins[i]
 	coins.remove_at(i)
-	money_earned.emit(c.value)
+	money_earned.emit(c.value, int(c.get("count", 1)), by_snail)
 	sfx.emit("coin", 0.3 if by_snail else 1.0)
 	# Collections close together in time and space add up into one popup.
 	for p in popups:
@@ -605,6 +606,7 @@ func _gui_input(event: InputEvent) -> void:
 			if _collect_near(mouse_cell) == 0 and in_water(mouse_cell):
 				drop_food(mouse_cell - Vector2(0.5, 0.5))
 				sfx.emit("food", 1.0)
+				player_food += 1
 			accept_event()
 		elif event.button_index == MOUSE_BUTTON_RIGHT:
 			var f := _fish_at(mouse_cell)
