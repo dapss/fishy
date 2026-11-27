@@ -24,6 +24,8 @@ var _msg := ""
 var _msg_time := 0.0
 var _refresh_t := 0.0
 var _save_t := 0.0
+var _afford_normal: StyleBoxFlat
+var _afford_hover: StyleBoxFlat
 
 
 func _ready() -> void:
@@ -170,6 +172,13 @@ func _build_theme() -> Theme:
 	th.set_color("font_pressed_color", "Button", Color("ffffff"))
 	th.set_color("font_disabled_color", "Button", Color("4a5d70"))
 	th.set_color("font_color", "Label", Color("9fc7e0"))
+	# Buttons you can afford right now glow green.
+	_afford_normal = normal.duplicate() as StyleBoxFlat
+	_afford_normal.bg_color = Color("0f2a22")
+	_afford_normal.border_color = Color("3fbf7f")
+	_afford_hover = _afford_normal.duplicate() as StyleBoxFlat
+	_afford_hover.bg_color = Color("16402f")
+	_afford_hover.border_color = Color("7fffb0")
 	return th
 
 
@@ -307,11 +316,13 @@ func _refresh() -> void:
 			b.text = "???  $" + Data.fmt(cost)
 			b.tooltip_text = "Buy the previous fish to discover this one."
 			b.disabled = true
+			_mark_affordable(b)
 		else:
 			b.text = "%s  %s  $%s" % [sp.icon, sp.name, Data.fmt(cost)]
 			b.tooltip_text = "%s: drops $%s every %ss. You own %d." % [
 				sp.name, Data.fmt(sp.value), str(sp.interval), owned(i)]
 			b.disabled = money < cost or full
+			_mark_affordable(b)
 
 	for key in upgrade_buttons:
 		var b: Button = upgrade_buttons[key]
@@ -320,11 +331,24 @@ func _refresh() -> void:
 		if lv >= int(u.max):
 			b.text = "%s  MAX" % u.name
 			b.disabled = true
+			_mark_affordable(b)
 		else:
 			var cost := Data.upgrade_cost(key, lv)
 			var lv_txt := "" if int(u.max) == 1 else "  lv%d" % lv
 			b.text = "%s%s  $%s" % [u.name, lv_txt, Data.fmt(cost)]
 			b.disabled = money < cost
+			_mark_affordable(b)
+
+
+func _mark_affordable(b: Button) -> void:
+	if b.disabled:
+		b.remove_theme_stylebox_override("normal")
+		b.remove_theme_stylebox_override("hover")
+		b.remove_theme_color_override("font_color")
+	else:
+		b.add_theme_stylebox_override("normal", _afford_normal)
+		b.add_theme_stylebox_override("hover", _afford_hover)
+		b.add_theme_color_override("font_color", Color("b8ffd6"))
 
 
 # ---------------------------------------------------------------- save / load

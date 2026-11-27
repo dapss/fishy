@@ -26,12 +26,17 @@ const C_WATER_TOP := Color("0c2238")
 const C_WATER_BOTTOM := Color("081627")
 const C_GLASS := Color("3a6b8a")
 const C_SURFACE := Color("5fb3d9")
-const C_SAND := Color("c2a46b")
-const C_WEED := Color("3fae6a")
+const C_SAND := Color("8a7550")
+const C_WEED := Color("2a6b48")
+const C_WEED_TIP := Color("4a9168")
 const C_FOOD := Color("d98c4a")
-const C_BUBBLE := Color(0.7, 0.9, 1.0, 0.7)
-const C_SNAIL := Color("e0a96d")
-const C_CASTLE := Color("8a8fa3")
+const C_BUBBLE := Color(0.7, 0.9, 1.0, 0.4)
+const C_SNAIL := Color("ff9f6b")
+const C_CASTLE := Color("5d6377")
+const C_COPPER := Color("d08a4a")
+const C_SILVER := Color("dfe6f0")
+const C_GOLD := Color("ffd84d")
+const C_GEM := Color("7ff9ff")
 const C_FEEDER := Color("9fb3c8")
 
 
@@ -118,8 +123,10 @@ func _recalc_grid() -> void:
 	for fd in foods:
 		fd.pos.x = clamp(fd.pos.x, 1.0, cols - 2.0)
 		fd.pos.y = min(fd.pos.y, floor_y())
-	for s in snails:
-		s.x = clamp(s.x, 1.0, cols - 4.0)
+	for i in snails.size():
+		var lane := _snail_lane(i)
+		snails[i].x = clamp(snails[i].x, max(1.0, lane.x - 1.0), min(cols - 4.0, max(lane.x - 1.0, lane.y - 2.0)))
+		snails[i].target = null
 
 
 func sand_row() -> int:
@@ -237,10 +244,17 @@ func estimate_rate() -> float:
 
 
 func set_snails(n: int) -> void:
-	while snails.size() < n:
-		snails.append({"x": randf_range(2, cols - 5), "dir": 1, "speed": 3.0})
 	while snails.size() > n:
 		snails.pop_back()
+	while snails.size() < n:
+		snails.append({"x": 2.0, "dir": 1, "speed": 4.0, "target": null,
+			"rest": 0.0, "idle_x": 2.0, "moving": false})
+	# Lanes changed: start every snail in the middle of its lane.
+	for i in snails.size():
+		var lane := _snail_lane(i)
+		snails[i].x = clamp((lane.x + lane.y) * 0.5 - 1.0, 1.0, cols - 4.0)
+		snails[i].target = null
+		snails[i].rest = 0.0
 
 
 func set_weeds(n: int) -> void:
@@ -340,7 +354,7 @@ func _update_fish(dt: float) -> void:
 				f.coin_timer = 0.0
 				coins.append({
 					"pos": f.pos + Vector2(f.w * 0.5, f.h * 0.5),
-					"value": fish_value(f), "landed": false, "life": 90.0,
+					"value": fish_value(f), "landed": false, "life": COIN_LIFE, "count": 1,
 				})
 
 
@@ -367,6 +381,16 @@ func _update_food(dt: float) -> void:
 				foods.remove_at(i)
 
 
+const COIN_LIFE := 90.0
+
+
+func _has_coin(target) -> bool:
+	for c in coins:
+		if is_same(c, target):
+			return true
+	return false
+
+
 func _update_coins(dt: float) -> void:
 	for i in range(coins.size() - 1, -1, -1):
 		var c: Dictionary = coins[i]
@@ -375,39 +399,68 @@ func _update_coins(dt: float) -> void:
 			if c.pos.y >= floor_y():
 				c.pos.y = floor_y()
 				c.landed = true
+				# Land on a nearby pile instead of making a new coin.
+				for other in coins:
+					if not is_same(other, c) and other.landed and abs(other.pos.x - c.pos.x) < 2.0:
+						other.value += c.value
+						other.count += c.count
+						other.life = COIN_LIFE
+						coins.remove_at(i)
+						break
 		else:
 			c.life -= dt
 			if c.life <= 0.0:
 				coins.remove_at(i)
 
 
+# The sand is split into one lane per snail. Each snail only looks after
+# its own lane, so they spread out instead of bunching up, and it keeps
+# its current target until it reaches it, so it doesn't flip-flop.
+func _snail_lane(i: int) -> Vector2:
+	var n: int = max(1, snails.size())
+	var width := float(cols - 2) / n
+	return Vector2(1.0 + i * width, 1.0 + (i + 1) * width)   # [from, to) in cells
+
+
 func _update_snails(dt: float) -> void:
-	var claimed := []   # each snail goes after a different coin
-	for s in snails:
-		var target_x := -1.0
-		var target = null
-		var best := INF
-		for c in coins:
-			if (c.landed or c.pos.y > floor_y() - 1.5) and not claimed.has(c):
-				var d: float = abs(c.pos.x - (s.x + 1.0))
-				if d < best:
-					best = d
-					target_x = c.pos.x
-					target = c
-		if target != null:
-			claimed.append(target)
-		if target_x >= 0.0:
-			s.dir = 1 if target_x > s.x + 1.0 else -1
-		elif s.x <= 1.5:
-			s.dir = 1
-		elif s.x >= cols - 5.0:
-			s.dir = -1
-		s.x = clamp(s.x + s.dir * s.speed * dt, 1.0, cols - 4.0)
-		# Collect anything under the snail.
-		for i in range(coins.size() - 1, -1, -1):
-			var c: Dictionary = coins[i]
-			if c.pos.y > floor_y() - 1.5 and abs(c.pos.x - (s.x + 1.0)) < 1.6:
-				_collect(i)
+	for i in snails.size():
+		var s: Dictionary = snails[i]
+		var lane := _snail_lane(i)
+		var center: float = s.x + 1.0
+		# Drop the target if it was collected or faded.
+		if s.target != null and not _has_coin(s.target):
+			s.target = null
+		if s.target == null:
+			var best := INF
+			for c in coins:
+				if c.landed and c.pos.x >= lane.x and c.pos.x < lane.y:
+					var d: float = abs(c.pos.x - center)
+					if d < best:
+						best = d
+						s.target = c
+		var goal := -1.0
+		if s.target != null:
+			goal = s.target.pos.x
+		else:
+			# Nothing to do: rest, then amble to a new spot in the lane.
+			s.rest -= dt
+			if s.rest <= 0.0:
+				s.rest = randf_range(3.0, 8.0)
+				s.idle_x = randf_range(lane.x + 1.0, max(lane.x + 1.0, lane.y - 2.0))
+			goal = s.idle_x
+		var dx: float = goal - center
+		var spd: float = s.speed if s.target != null else s.speed * 0.4
+		s.moving = abs(dx) > 0.3
+		if s.moving:
+			s.dir = 1 if dx > 0.0 else -1
+			s.x += sign(dx) * min(abs(dx), spd * dt)
+		s.x = clamp(s.x, lane.x - 1.0, max(lane.x - 1.0, lane.y - 2.0))
+		s.x = clamp(s.x, 1.0, cols - 4.0)
+		# Collect any landed coin under the snail.
+		for j in range(coins.size() - 1, -1, -1):
+			var c: Dictionary = coins[j]
+			if c.landed and abs(c.pos.x - (s.x + 1.0)) < 1.6:
+				_collect(j)
 
 
 func _update_bubbles(dt: float) -> void:
@@ -484,11 +537,25 @@ func _collect(i: int) -> void:
 	var c: Dictionary = coins[i]
 	coins.remove_at(i)
 	money_earned.emit(c.value)
-	_popup("+$" + Data.fmt(c.value), c.pos + Vector2(0, -0.6), Color("ffd84d"))
+	# Collections close together in time and space add up into one popup.
+	for p in popups:
+		if p.has("amount") and p.life > 0.7 and abs(p.pos.x - c.pos.x) < 8.0 and abs(p.pos.y - c.pos.y) < 3.0:
+			p.amount += c.value
+			p.text = "+$" + Data.fmt(p.amount)
+			p.life = 1.2
+			return
+	var np := _popup("+$" + Data.fmt(c.value), c.pos + Vector2(0, -0.8), Color("ffd84d"))
+	np["amount"] = c.value
 
 
-func _popup(text: String, p: Vector2, color: Color) -> void:
-	popups.append({"text": text, "pos": p, "life": 1.2, "color": color})
+func _popup(text: String, p: Vector2, color: Color) -> Dictionary:
+	# Nudge upward so new popups don't print on top of existing ones.
+	for other in popups:
+		if abs(other.pos.y - p.y) < 0.9 and abs(other.pos.x - p.x) < (String(other.text).length() + text.length()) * 0.5 + 1.0:
+			p.y = other.pos.y - 1.0
+	var d := {"text": text, "pos": p, "life": 1.2, "color": color}
+	popups.append(d)
+	return d
 
 
 # ---------------------------------------------------------------- input
@@ -536,6 +603,12 @@ func _put(x: float, y: float, text: String, color: Color) -> void:
 			draw_char(font, base + Vector2(i * cell.x, 0).round(), ch, font_size, color)
 
 
+func _water_color(y: float) -> Color:
+	var water_rows := sand_row() - 1
+	var t: float = clampf((floor(y) - 1.0) / maxf(1.0, water_rows - 1.0), 0.0, 1.0)
+	return C_WATER_TOP.lerp(C_WATER_BOTTOM, t)
+
+
 func _draw() -> void:
 	if font == null:
 		return
@@ -543,13 +616,12 @@ func _draw() -> void:
 	# Water, a little darker toward the bottom.
 	var water_rows := sand_row() - 1
 	for r in water_rows:
-		var t: float = float(r) / maxf(1.0, water_rows - 1.0)
 		draw_rect(Rect2(origin + Vector2(cell.x, (r + 1) * cell.y), Vector2((cols - 2) * cell.x, cell.y)),
-			C_WATER_TOP.lerp(C_WATER_BOTTOM, t))
+			_water_color(r + 1))
 
 	# Drifting specks in the water.
 	for m in motes:
-		_put(m.pos.x, m.pos.y, ".", Color(0.6, 0.8, 1.0, 0.18))
+		_put(m.pos.x, m.pos.y, ".", Color(0.6, 0.8, 1.0, 0.12))
 
 	# Glass.
 	var inner := cols - 2
@@ -582,14 +654,14 @@ func _draw() -> void:
 		var h: int = min(int(wd.h), sand_row() - 3)
 		for k in h:
 			var ch := "(" if (k + int(time * 1.5 + wd.phase)) % 2 == 0 else ")"
-			_put(x, sand_row() - 1 - k, ch, C_WEED.lerp(Color("8be0a4"), float(k) / max(1, h)))
+			_put(x, sand_row() - 1 - k, ch, C_WEED.lerp(C_WEED_TIP, float(k) / max(1, h)))
 
 	# Castle.
 	if has_castle:
 		var cx: float = floor(cols * 0.62)
 		for k in CASTLE.size():
 			_put(cx, sand_row() - CASTLE.size() + k, CASTLE[k], C_CASTLE)
-		_put(cx + 3, sand_row() - CASTLE.size(), ">" if int(time * 2.0) % 2 == 0 else "}", Color("ff6f6f"))
+		_put(cx + 3, sand_row() - CASTLE.size(), ">" if int(time * 2.0) % 2 == 0 else "}", Color("b85a5a"))
 
 	# Auto-feeder hanging at the surface.
 	if feeder_level > 0:
@@ -603,20 +675,29 @@ func _draw() -> void:
 		var ch := "." if prog < 0.3 else ("o" if prog < 0.75 else "O")
 		_put(b.pos.x, b.pos.y, ch, C_BUBBLE)
 
-	for c in coins:
-		if c.landed and c.life < 15.0 and fmod(time, 0.5) < 0.2:
-			continue
-		var v: float = c.value
-		if v >= 1000.0:
-			_put(c.pos.x, c.pos.y, "<>", Color("7ff9ff"))
-		else:
-			var col := Color("c87533") if v < 10.0 else (Color("d8dde6") if v < 100.0 else Color("ffd84d"))
-			_put(c.pos.x, c.pos.y, "$", col)
-
 	for s in snails:
 		_put(s.x, floor_y(), SNAIL_RIGHT if s.dir > 0 else SNAIL_LEFT, C_SNAIL)
 
-	for f: Fish in fishes:
+	# Coins: a pile grows as more coins land on it; color shows its value.
+	for c in coins:
+		if c.landed and c.life < 15.0 and fmod(time, 0.5) < 0.2:
+			continue
+		var n: int = c.count
+		var glyph := "$" if n <= 1 else ("$$" if n <= 3 else "<$>")
+		var v: float = c.value
+		var col := C_COPPER
+		if v >= 1000.0:
+			col = C_GEM
+		elif v >= 100.0:
+			col = C_GOLD
+		elif v >= 10.0:
+			col = C_SILVER
+		_put(c.pos.x - (glyph.length() - 1) * 0.5, c.pos.y, glyph, col)
+
+	# Big fish swim behind small ones.
+	var order := fishes.duplicate()
+	order.sort_custom(func(a, b): return a.w * a.h > b.w * b.h)
+	for f: Fish in order:
 		_draw_fish(f)
 
 	for p in popups:
@@ -649,15 +730,31 @@ func _draw_fish(f: Fish) -> void:
 		var c: Color = palette[key]
 		c = c.lerp(gray, dim)
 		if f == hovered:
-			c = c.lightened(0.3)
+			c = c.lightened(0.15)
 		palette[key] = c
 
 	var bob := sin(time * 2.0 + f.phase) * 0.12
 	var blinking := f.blink > 0.0 or f.hunger >= 1.0
+
+	if f == hovered:
+		var pad := Vector2(cell.x * 0.6, cell.y * 0.35)
+		var r := Rect2(origin + Vector2(f.pos.x * cell.x, (f.pos.y + bob) * cell.y) - pad,
+			Vector2(f.w * cell.x, f.h * cell.y) + pad * 2.0)
+		var oc: Color = body
+		oc.a = 0.45
+		draw_rect(r, oc, false, 1.0)
+
 	for k in spr.size():
 		var row: String = spr[k]
 		var mrow: String = mask[k]
-		var base := origin + Vector2(f.pos.x * cell.x, (f.pos.y + k + bob) * cell.y + ascent)
+		var y := f.pos.y + k + bob
+		# Paint water behind this row so the fish hides whatever swims behind it.
+		var first := row.length() - row.lstrip(" ").length()
+		var last := row.rstrip(" ").length()
+		if last > first:
+			draw_rect(Rect2(origin + Vector2((f.pos.x + first) * cell.x, y * cell.y),
+				Vector2((last - first) * cell.x, cell.y)), _water_color(y))
+		var base := origin + Vector2(f.pos.x * cell.x, y * cell.y + ascent)
 		for i in row.length():
 			var ch := row[i]
 			if ch == " ":
