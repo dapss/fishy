@@ -79,6 +79,7 @@ var motes: Array = []     # {pos, vel}
 var coin_mult := 1.0
 var feeder_level := 0
 var has_castle := false
+var transparent_outside := false   # don't paint the area around the glass
 
 var hovered: Fish = null
 var mouse_cell := Vector2(-100, -100)
@@ -222,6 +223,16 @@ func add_fish(species: int, level := 0, xp := 0, hunger := 0.2, splash := false)
 	f.target = _random_spot(f)
 	fishes.append(f)
 	return f
+
+
+# Empties the tank (used when the player resets their save).
+func reset() -> void:
+	fishes.clear()
+	foods.clear()
+	coins.clear()
+	popups.clear()
+	snails.clear()
+	hovered = null
 
 
 func remove_fish(f: Fish) -> void:
@@ -612,7 +623,8 @@ func _water_color(y: float) -> Color:
 func _draw() -> void:
 	if font == null:
 		return
-	draw_rect(Rect2(Vector2.ZERO, size), C_BG)
+	if not transparent_outside:
+		draw_rect(Rect2(Vector2.ZERO, size), C_BG)
 	# Water, a little darker toward the bottom.
 	var water_rows := sand_row() - 1
 	for r in water_rows:
