@@ -5,6 +5,12 @@ extends Control
 var _title: Label
 var _body: Label
 var _button: Button
+# Widest the card may get (the main scene sets this from the window width).
+var max_width := 440.0:
+	set(v):
+		max_width = v
+		if _body != null:
+			_body.custom_minimum_size.x = clampf(v - 40.0, 180.0, 440.0)
 
 
 func _ready() -> void:
@@ -36,6 +42,8 @@ func _ready() -> void:
 	vb.add_child(_title)
 	_body = Label.new()
 	_body.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_body.custom_minimum_size.x = 400.0
 	vb.add_child(_body)
 	_button = Button.new()
 	_button.focus_mode = Control.FOCUS_NONE

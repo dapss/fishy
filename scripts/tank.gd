@@ -3,8 +3,7 @@
 extends Control
 
 signal money_earned(amount: float)
-signal sell_requested(fish)
-signal fish_opened(fish)              # double-clicked a fish
+signal fish_opened(fish)              # right-clicked or double-clicked a fish
 signal sfx(sound: String, gain: float)
 
 const Data = preload("res://scripts/data.gd")
@@ -610,7 +609,7 @@ func _gui_input(event: InputEvent) -> void:
 		elif event.button_index == MOUSE_BUTTON_RIGHT:
 			var f := _fish_at(mouse_cell)
 			if f != null:
-				sell_requested.emit(f)
+				fish_opened.emit(f)
 			accept_event()
 
 

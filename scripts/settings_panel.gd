@@ -6,6 +6,7 @@ signal changed(key: String, value)
 signal snap_requested(corner: String)      # "left" | "right"
 signal reset_requested
 signal closed
+signal help_requested
 
 const LAYOUTS := ["auto", "full", "compact"]
 const LAYOUT_NAMES := ["Auto", "Full", "Compact"]
@@ -31,7 +32,6 @@ var _reset_button: Button
 var _reset_armed := 0.0
 var _scroll: ScrollContainer
 var _content: VBoxContainer
-var _hint: Label
 
 
 func _ready() -> void:
@@ -125,15 +125,6 @@ func _ready() -> void:
 	snap.add_child(_button("right", func(): snap_requested.emit("right")))
 	vb.add_child(snap)
 
-	var hint := Label.new()
-	_hint = hint
-	hint.text = ("Esc settings · S shop · 1-6 buy fish · F feed · Space collect all · "
-		+ "M mute · Ctrl+Z undo sell · Alt+drag move · double-click a fish to name it")
-	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	hint.add_theme_color_override("font_color", Color("4f7a96"))
-	hint.add_theme_font_size_override("font_size", 13)
-	vb.add_child(hint)
-
 	var bottom := HBoxContainer.new()
 	_reset_button = _button("Reset save...", _on_reset)
 	_reset_button.add_theme_color_override("font_color", Color("ff8a8a"))
@@ -141,6 +132,9 @@ func _ready() -> void:
 	var spacer := Control.new()
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	bottom.add_child(spacer)
+	var help := _button("Help", func(): help_requested.emit())
+	help.tooltip_text = "How to play and all shortcuts (F1)"
+	bottom.add_child(help)
 	bottom.add_child(_button("Close", func(): closed.emit()))
 	vb.add_child(bottom)
 	_fit.call_deferred()
@@ -163,8 +157,6 @@ func _fit() -> void:
 	var w := minf(maxf(want.x, 380.0), max_w)
 	_scroll.custom_minimum_size.x = w
 	_content.custom_minimum_size.x = w - 14.0   # room for the scrollbar
-	# A wrapping label only knows its height once it knows its width.
-	_hint.custom_minimum_size.x = w - 14.0
 	_scroll.custom_minimum_size.y = minf(_content.get_combined_minimum_size().y, maxf(80.0, size.y - 48.0))
 
 

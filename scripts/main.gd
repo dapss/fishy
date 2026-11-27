@@ -9,6 +9,7 @@ const ResizeGrip = preload("res://scripts/resize_grip.gd")
 const Audio = preload("res://scripts/audio.gd")
 const FishCard = preload("res://scripts/fish_card.gd")
 const InfoCard = preload("res://scripts/info_card.gd")
+const HelpCard = preload("res://scripts/help_card.gd")
 const SAVE_PATH := "user://fishy_save.json"
 const AUTOSAVE_SECONDS := 30.0
 const WIDGET_SIZES := {
@@ -46,6 +47,10 @@ var stats_label: Label
 var goal_label: Label
 var bar_spacer: Control
 var top_row: HBoxContainer
+var outer_margin: MarginContainer
+var settings_button: Button
+var shop_scroll: ScrollContainer   # holds the shop inside the compact pop-up
+var _compact_btn := {}              # tighter button styles for the compact top bar
 var info_label: Label
 var undo_button: Button
 var pin_button: Button
@@ -58,6 +63,8 @@ var shop_popup: PanelContainer
 var settings_panel
 var fish_card
 var info_card
+var help_card
+var help_button: Button
 var tip_box: PanelContainer
 var tip_label: Label
 var tray: StatusIndicator
@@ -100,9 +107,12 @@ func _ready() -> void:
 	_build_ui()
 	_build_tray()
 	_set_food_cursor()
-	_restore_window()
-	_apply_settings()
+	# Borderless first: Windows keeps the outer size when the frame is
+	# removed, so sizing before that would make the inside grow.
 	resized.connect(_update_layout)
+	_apply_settings()
+	_restore_window()
+	_update_layout.call_deferred()
 	if not _load_game():
 		_apply_upgrades()
 		tank.add_fish(0, 0, 0, 0.3)
@@ -173,7 +183,9 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	var k: int = event.keycode
 	var handled := true
 	if k == KEY_ESCAPE:
-		if fish_card.visible:
+		if help_card.visible:
+			help_card.hide()
+		elif fish_card.visible:
 			fish_card.close()
 		elif info_card.visible:
 			info_card.hide()
@@ -181,7 +193,9 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			shop_popup.visible = false
 		else:
 			_toggle_settings()
-	elif settings_panel.visible or fish_card.visible or info_card.visible:
+	elif k == KEY_F1 or event.unicode == 63:      # F1 or "?"
+		_toggle_help()
+	elif settings_panel.visible or fish_card.visible or info_card.visible or help_card.visible:
 		handled = false
 	elif k == KEY_Z and event.ctrl_pressed:
 		_undo_sell()
@@ -431,6 +445,15 @@ func _build_theme() -> Theme:
 	_afford_hover = _afford_normal.duplicate() as StyleBoxFlat
 	_afford_hover.bg_color = Color("16402f")
 	_afford_hover.border_color = Color("7fffb0")
+
+	for state in ["normal", "hover", "pressed"]:
+		var src: StyleBoxFlat = {"normal": normal, "hover": hover, "pressed": pressed}[state]
+		var tight := src.duplicate() as StyleBoxFlat
+		tight.content_margin_left = 5
+		tight.content_margin_right = 5
+		tight.content_margin_top = 2
+		tight.content_margin_bottom = 2
+		_compact_btn[state] = tight
 	return th
 
 
@@ -446,6 +469,7 @@ func _build_ui() -> void:
 	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	for side in ["left", "right", "top", "bottom"]:
 		margin.add_theme_constant_override("margin_" + side, 8)
+	outer_margin = margin
 	add_child(margin)
 
 	main_vb = VBoxContainer.new()
@@ -498,9 +522,12 @@ func _build_ui() -> void:
 	pin_button = _make_button("[ pin ]", func(): _set_setting("on_top", not settings.values.on_top))
 	pin_button.tooltip_text = "Keep the tank above other windows."
 	top.add_child(pin_button)
-	var gear := _make_button("[ = ]", _toggle_settings)
-	gear.tooltip_text = "Settings (Esc)"
-	top.add_child(gear)
+	help_button = _make_button("[ ? ]", _toggle_help)
+	help_button.tooltip_text = "Help (F1)"
+	top.add_child(help_button)
+	settings_button = _make_button("[ = ]", _toggle_settings)
+	settings_button.tooltip_text = "Settings (Esc)"
+	top.add_child(settings_button)
 	min_button = _make_button("_", _minimize)
 	min_button.tooltip_text = "Minimize"
 	top.add_child(min_button)
@@ -512,9 +539,8 @@ func _build_ui() -> void:
 	tank = TankScript.new()
 	tank.font = font
 	tank.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	tank.custom_minimum_size = Vector2(300, 150)
+	tank.custom_minimum_size = Vector2(200, 90)
 	tank.money_earned.connect(_on_money)
-	tank.sell_requested.connect(_sell_fish)
 	tank.fish_opened.connect(_open_fish_card)
 	# Snail pickups are quieter and rate-limited so they don't get annoying.
 	tank.sfx.connect(func(sound, gain): audio.play(sound, gain, 140 if gain < 0.5 else 45))
@@ -526,6 +552,8 @@ func _build_ui() -> void:
 	info_label = Label.new()
 	info_label.custom_minimum_size.y = 20
 	info_label.clip_text = true
+	info_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	info_label.mouse_filter = Control.MOUSE_FILTER_PASS
 	info_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_floating_labels.append(info_label)
 	info_row.add_child(info_label)
@@ -570,6 +598,9 @@ func _build_ui() -> void:
 	shop_popup.grow_vertical = Control.GROW_DIRECTION_BEGIN
 	shop_popup.visible = false
 	add_child(shop_popup)
+	shop_scroll = ScrollContainer.new()
+	shop_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	shop_popup.add_child(shop_scroll)
 
 	# First-time tip bubble, just under the top bar.
 	tip_box = PanelContainer.new()
@@ -605,12 +636,17 @@ func _build_ui() -> void:
 	info_card = InfoCard.new()
 	add_child(info_card)
 
+	help_card = HelpCard.new()
+	help_card.tips_reset_requested.connect(_reset_tips)
+	add_child(help_card)
+
 	settings_panel = SettingsPanel.new()
 	settings_panel.visible = false
 	settings_panel.changed.connect(_set_setting)
 	settings_panel.snap_requested.connect(_snap_to_corner)
 	settings_panel.reset_requested.connect(_reset_game)
 	settings_panel.closed.connect(func(): settings_panel.visible = false)
+	settings_panel.help_requested.connect(_toggle_help)
 	add_child(settings_panel)
 
 
@@ -659,6 +695,7 @@ func _toggle_settings() -> void:
 
 
 func _open_fish_card(f) -> void:
+	_fit_popups()
 	var sp: Dictionary = Data.SPECIES[f.species]
 	fish_card.open(f, "%s  %s" % [sp.icon, sp.name], sp.color)
 	_refresh()
@@ -666,8 +703,22 @@ func _open_fish_card(f) -> void:
 
 # ---------------------------------------------------------------- tips
 
+func _toggle_help() -> void:
+	settings_panel.visible = false
+	shop_popup.visible = false
+	help_card.toggle()
+
+
+func _reset_tips() -> void:
+	tips_seen.clear()
+	_tip_cooldown = 1.0
+	_play_time = 0.0
+	_save_game()
+	_say("Tips will show again as you play.")
+
+
 func _check_tips() -> void:
-	if tip_box.visible or _tip_cooldown > 0.0 or settings_panel.visible or info_card.visible:
+	if tip_box.visible or _tip_cooldown > 0.0 or settings_panel.visible or info_card.visible or help_card.visible:
 		return
 	for id in TIP_ORDER:
 		if tips_seen.has(id):
@@ -700,7 +751,7 @@ func _tip_text(id: String) -> String:
 				return "Tired of clicking coins? A snail collects them for you. It's in the shop."
 		"name":
 			if _play_time > 150.0:
-				return "Tip: double-click a fish to give it a name."
+				return "Tip: right-click a fish to name it or see its stats."
 		"settings":
 			if _play_time > 240.0:
 				return "Tip: Esc opens settings: desktop widget mode, always on top, sound, text size."
@@ -727,7 +778,10 @@ func _apply_settings() -> void:
 	var v: Dictionary = settings.values
 	var w := get_window()
 	w.min_size = MIN_WINDOW
-	w.borderless = v.borderless
+	if w.borderless != v.borderless:
+		var inner := w.size                 # keep the same inside size
+		w.borderless = v.borderless
+		w.size = inner
 	w.always_on_top = v.on_top
 	# The window itself is always created transparent-capable (project setting
 	# display/window/size/transparent): Windows ignores turning that on later.
@@ -786,15 +840,53 @@ func _update_layout() -> void:
 	var scale := float(settings.values.ui_scale)
 	top_row.add_theme_constant_override("separation", 6 if want else 12)
 	pin_button.visible = not (want and size.x < 470.0 * scale)
+	_style_for_size(want, scale)
 	if want == compact:
 		return
 	compact = want
 	shop_box.get_parent().remove_child(shop_box)
 	if compact:
-		shop_popup.add_child(shop_box)
+		shop_scroll.add_child(shop_box)
 	else:
 		main_vb.add_child(shop_box)
 		shop_popup.visible = false
+
+
+# Small windows: tighter margins and buttons, smaller status text.
+func _style_for_size(small: bool, scale: float) -> void:
+	for side in ["left", "right", "top", "bottom"]:
+		outer_margin.add_theme_constant_override("margin_" + side, 4 if small else 8)
+	main_vb.add_theme_constant_override("separation", 3 if small else 6)
+	shop_button.text = "[shop]" if small else "[ shop ]"
+	settings_button.text = "[=]" if small else "[ = ]"
+	help_button.text = "[?]" if small else "[ ? ]"
+	undo_button.text = "[undo]" if small else "[ undo sell ]"
+	for b in [shop_button, pin_button, help_button, settings_button, min_button, close_button, undo_button]:
+		for state in _compact_btn:
+			if small:
+				b.add_theme_stylebox_override(state, _compact_btn[state])
+			else:
+				b.remove_theme_stylebox_override(state)
+	var small_font := int(round(13.0 * scale))
+	for l in [info_label, tip_label]:
+		if small:
+			l.add_theme_font_size_override("font_size", small_font)
+		else:
+			l.remove_theme_font_size_override("font_size")
+	info_label.custom_minimum_size.y = 16 if small else 20
+	_fit_popups()
+
+
+# Keep pop-ups inside the window: the compact shop scrolls when it's
+# taller than the space under the top bar, cards wrap to the window width.
+func _fit_popups() -> void:
+	var top := top_bar.get_global_rect().end.y
+	# Space under the top bar, minus the pop-up's own padding and gap.
+	var pad: float = shop_popup.get_theme_stylebox("panel").get_minimum_size().y
+	var room := maxf(60.0, size.y - top - pad - 16.0)
+	shop_scroll.custom_minimum_size.y = minf(shop_box.get_combined_minimum_size().y, room)
+	info_card.max_width = size.x - 40.0
+	fish_card.max_width = size.x - 40.0
 
 
 func _on_top_bar_input(event: InputEvent) -> void:
@@ -1051,14 +1143,21 @@ func _refresh() -> void:
 		var sp: Dictionary = Data.SPECIES[f.species]
 		var bars := int(round((1.0 - f.hunger) * 8.0))
 		var lv_txt := "MAX" if f.level >= Data.MAX_LEVEL else "%d (xp %d/%d)" % [f.level, f.xp, Data.xp_needed(f.level)]
-		info_label.text = "%s %s   lvl %s   food [%s%s]   $%s per coin   double-click: name   right-click: sell" % [
-			sp.icon, fish_title(f), lv_txt, "#".repeat(bars), "-".repeat(8 - bars), Data.fmt(tank.fish_value(f))]
+		if compact:
+			info_label.text = "%s lv%s  [%s%s]  $%s/coin" % [
+				fish_title(f), "MAX" if f.level >= Data.MAX_LEVEL else str(f.level),
+				"#".repeat(bars / 2), "-".repeat(4 - bars / 2), Data.fmt(tank.fish_value(f))]
+		else:
+			info_label.text = "%s %s   lvl %s   food [%s%s]   $%s per coin   right-click: name / sell" % [
+				sp.icon, fish_title(f), lv_txt, "#".repeat(bars), "-".repeat(8 - bars), Data.fmt(tank.fish_value(f))]
 		info_label.add_theme_color_override("font_color", sp.color)
 	elif _msg_time > 0.0:
 		info_label.text = _msg
 		info_label.add_theme_color_override("font_color", Color("9fc7e0"))
 	else:
 		info_label.text = ""
+	# Whatever doesn't fit gets "..."; hover the line to read all of it.
+	info_label.tooltip_text = info_label.text
 	undo_button.visible = _undo_time > 0.0 and not _undo.is_empty()
 
 	if fish_card.visible:
@@ -1073,12 +1172,14 @@ func _refresh() -> void:
 				str(Data.SPECIES[cf.species].interval)], "Sell for $%s" % Data.fmt(sell_value(cf)))
 
 	if tip_box.visible:
-		tip_label.custom_minimum_size.x = min(520.0, size.x - 80.0)
-		var y := top_bar.get_global_rect().end.y + 30.0
+		tip_label.custom_minimum_size.x = min(520.0, size.x - (36.0 if compact else 80.0))
+		var y := top_bar.get_global_rect().end.y + (6.0 if compact else 30.0)
 		tip_box.offset_top = y
 		tip_box.offset_bottom = y
 
 	_refresh_shop(rate)
+	if compact and shop_popup.visible:
+		_fit_popups()
 
 
 func _refresh_shop(rate: float) -> void:
@@ -1236,8 +1337,9 @@ func _offline_earnings(secs: float) -> void:
 		return
 	var lines := ["You were gone %s." % Data.fmt_time(secs), "Your fish made  $%s" % Data.fmt(earned)]
 	if upgrades.snail == 0:
-		lines.append("\n(A snail would have collected a lot more of it.)")
+		lines.append(("" if compact else "\n") + "(A snail would have collected a lot more of it.)")
 	if upgrades.feeder == 0:
 		lines.append("Your fish are hungry: click the water to feed them.")
+	_fit_popups()
 	info_card.open("-- while you were away --", "\n".join(lines))
 	_say("You were away %s. Your fish made $%s." % [Data.fmt_time(secs), Data.fmt(earned)])

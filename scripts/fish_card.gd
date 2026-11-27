@@ -1,5 +1,5 @@
 # Card for one fish: give it a name, see its stats, sell it.
-# Opened by double-clicking a fish. The main scene fills in the stats.
+# Opened by right-clicking (or double-clicking) a fish. The main scene fills in the stats.
 extends Control
 
 signal sell_requested(fish)
@@ -11,6 +11,12 @@ var _title: Label
 var _name_edit: LineEdit
 var _stats: Label
 var _sell: Button
+# Widest the card may get (the main scene sets this from the window width).
+var max_width := 440.0:
+	set(v):
+		max_width = v
+		if _name_edit != null:
+			_name_edit.custom_minimum_size.x = clampf(v - 140.0, 120.0, 220.0)
 
 
 func _ready() -> void:
