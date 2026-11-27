@@ -97,7 +97,7 @@ Prices grow with your coin multiplier (Minerals, Seaweed, Castle), so food stays
 - A click drops whatever the hungriest fish nearby eats. The food bar next to the info line (or `Q`) picks a food yourself.
 - The auto-feeder drops each hungry fish's own food from your stock, also while the game is closed. When a food runs out, those fish go hungry and stop making coins (they don't die).
 - You can store 100 of each food; the **Food hopper** upgrade raises that to 250, 500 and 1,000.
-- The **Dawa** doesn't eat. When it's lonely (`...`), move the mouse back and forth over it to pat it: pats cheer it up and teach it like meals do. A neglected Dawa sulks (`:(`) and stops making coins.
+- The **Dawa** doesn't eat. When it's lonely (`...`), move the mouse back and forth over it to pat it: pats cheer it up and teach it like meals do. A lonely Dawa droops, its head curving down, and a neglected one sulks (`:(`) and stops making coins. Keep patting a Dawa that's already fully happy and it overloads: a white flash, fireworks, and it's **super happy** for a minute, dropping coins twice as often (once every 5 minutes at most).
 - **Algae eaters** eat only grime, **sharks** only guppies.
 - **Treats**, priced at two minutes of your income: Gourmet treat (double XP for 10 minutes) and Golden flakes (coins x1.5 for 5 minutes).
 

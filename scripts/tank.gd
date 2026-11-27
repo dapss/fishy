@@ -54,6 +54,11 @@ const C_DEAD := Color("6c7480")
 const C_BONE := Color("d8d2c0")
 const C_CHOMP := Color("ff6b6b")
 const HUNT_AT := 0.5              # sharks hunt once this hungry: about a guppy a minute
+# Algae eaters: how much glass they scrape (cells), how hard, and how much
+# the grime they eat fills them up.
+const GRAZE_RADIUS := Vector2(2.2, 1.2)
+const GRAZE_POWER := 0.6
+const GRAZE_FOOD := 0.06
 const GRIME := [".", ".,", ":;", ";%", "%&", "#&%", "#@&"]
 # Sponge physics. Speeds are in cells per second.
 const SPONGE_POWER := 0.75        # share of the grime one slow pass takes
@@ -89,6 +94,10 @@ class Fish extends RefCounted:
 	var weak := 0.0           # just revived: no coins for a while
 	var pat_dist := 0.0       # Dawa: how far the mouse has stroked it since the last pat
 	var pats := 0
+	var overload := 0         # pats in a row while already fully happy
+	var last_pat := -99.0
+	var super_time := 0.0     # super happy: coins twice as often
+	var super_cd := 0.0       # until it can get super happy again
 
 
 var font: Font
@@ -107,6 +116,9 @@ var food_choice := "auto" # what a click drops: "auto" (what nearby fish need) o
 var gourmet_time := 0.0   # treat: double XP
 var golden_time := 0.0    # treat: coins worth more
 var _out_warned := {}     # kind -> time of the last "sold out" warning
+var sparks: Array = []    # fireworks: {pos, vel, life, glyph, color}
+var flashes: Array = []   # {pos (cells), life}
+var _mood_sprites := {}   # species -> mood -> sprite (the droopy Dawa)
 var coins: Array = []     # {pos, value, landed, life}
 var bubbles: Array = []   # {pos, speed, seed}
 var popups: Array = []    # {text, pos, life, color}
@@ -161,6 +173,11 @@ func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	for i in Data.SPECIES.size():
 		_sprites[i] = _build_sprite(Data.SPECIES[i])
+		var moods: Dictionary = Data.SPECIES[i].get("moods", {})
+		if not moods.is_empty():
+			_mood_sprites[i] = {}
+			for m in moods:
+				_mood_sprites[i][m] = _build_sprite(moods[m])
 	for i in 18:
 		motes.append({
 			"pos": Vector2(randf() * cols, randf() * rows),
@@ -327,6 +344,8 @@ func reset() -> void:
 	foods.clear()
 	coins.clear()
 	popups.clear()
+	sparks.clear()
+	flashes.clear()
 	snails.clear()
 	hovered = null
 
@@ -356,7 +375,7 @@ func estimate_rate() -> float:
 	var r := 0.0
 	for f in fishes:
 		if f.hunger < 1.0 and not f.dead and f.weak <= 0.0:
-			r += fish_value(f) / float(Data.SPECIES[f.species].interval)
+			r += fish_value(f) / coin_interval(f)
 	return r
 
 
@@ -551,6 +570,11 @@ func _update_fish(dt: float) -> void:
 		f.hunger = min(1.0, f.hunger + dt / Data.HUNGER_TIME)
 		f.weak = maxf(0.0, f.weak - dt)
 		var spd := f.speed * (0.5 if f.sick else 1.0)
+		f.super_time = maxf(0.0, f.super_time - dt)
+		f.super_cd = maxf(0.0, f.super_cd - dt)
+		var mope := mood(f)
+		if mope != "":
+			spd *= 0.45 if mope == "sadder" else 0.65   # mopes around near the bottom
 		var chasing := false
 		var center := f.pos + Vector2(f.w, f.h) * 0.5
 		var hunter := is_hunter(f)
@@ -573,11 +597,18 @@ func _update_fish(dt: float) -> void:
 					spd *= 1.5
 					chasing = true
 					break
-		elif _is_cleaner(f) and dirt_enabled:
-			# Grime is food too: grazing on it keeps an algae eater fed.
-			if dirt_at(center) > 0.15:
+		elif _is_cleaner(f):
+			if not dirt_enabled:
+				# No grime with dirt turned off: there's always some algae about.
 				f.hunger = maxf(0.0, f.hunger - dt * 2.0 / Data.HUNGER_TIME)
-			dirt.nibble(_glass_uv(center), Vector2(2.2 / cols, 1.2 / maxf(1.0, sand_row())), (0.25 if f.sick else 0.5) * dt)
+			else:
+				# Grime is its food: what it scrapes off the glass feeds it.
+				var got := dirt.wipe(_glass_uv(center), _glass_uv(center), GRAZE_RADIUS / Vector2(cols, maxf(1.0, sand_row())),
+					GRAZE_POWER * (0.5 if f.sick else 1.0) * dt, 0.0)
+				f.hunger = maxf(0.0, f.hunger - minf(got * GRAZE_FOOD, dt * 3.0 / Data.HUNGER_TIME))
+				# Crawl slowly over grime, swim normally between patches.
+				if dirt_at(center) > 0.12:
+					spd *= 0.35
 
 		# Hungry fish chase the nearest food of their own kind.
 		var my_food := drop_food_of(f)
@@ -605,7 +636,9 @@ func _update_fish(dt: float) -> void:
 			f.next_blink = randf_range(2.5, 7.0)
 		if not chasing and (f.pos.distance_to(f.target) < 0.5 or f.wander_timer <= 0.0):
 			f.target = _graze_spot(f) if _is_cleaner(f) else _random_spot(f)
-			f.wander_timer = randf_range(3.0, 9.0)
+			if mope != "":
+				f.target.y = randf_range(floor_y() - 5.0, floor_y() - 3.0)
+			f.wander_timer = randf_range(1.5, 3.0) if _is_cleaner(f) else randf_range(3.0, 9.0)
 
 		var dir := f.target - f.pos
 		var dist := dir.length()
@@ -636,7 +669,7 @@ func _update_fish(dt: float) -> void:
 		# Drop coins while not starving (and not still weak from being revived).
 		if f.hunger < 1.0 and f.weak <= 0.0:
 			f.coin_timer += dt
-			if f.coin_timer >= float(sp.interval):
+			if f.coin_timer >= coin_interval(f):
 				f.coin_timer = 0.0
 				coins.append({
 					"pos": f.pos + Vector2(f.w * 0.5, f.h * 0.5),
@@ -666,6 +699,23 @@ func _drift(f: Fish, dir: Vector2, spd: float, dt: float) -> void:
 	f.anim = 0.0 if squeeze else 1.0          # tentacles tuck in on the squeeze
 	if abs(dir.x) > 0.3:
 		f.facing = 1 if dir.x > 0 else -1
+
+
+# Seconds between coins; a super happy Dawa drops them twice as often.
+static func coin_interval(f) -> float:
+	var i := float(Data.SPECIES[f.species].interval)
+	return i * 0.5 if f.super_time > 0.0 else i
+
+
+# "" (fine), "sad" or "sadder": how much a lonely Dawa droops.
+static func mood(f) -> String:
+	if f.dead or Data.food_of(f.species) != "pat" or f.super_time > 0.0:
+		return ""
+	if f.hunger >= 1.0:
+		return "sadder"
+	if f.hunger > 0.7:
+		return "sad"
+	return ""
 
 
 static func is_hunter(f) -> bool:
@@ -710,14 +760,26 @@ func _devour(h: Fish, prey: Fish) -> void:
 
 
 # Algae eaters head for the dirtiest of a few random spots on the glass.
+# Algae eaters work their way along a patch: the dirtiest spot close by,
+# or, when everything near is clean, the dirtiest of a few spots anywhere.
 func _graze_spot(f: Fish) -> Vector2:
 	if not dirt_enabled or dirt.level < 0.01:
 		return _random_spot(f)
-	var best := _random_spot(f)
+	var half := Vector2(f.w, f.h) * 0.5
+	var here := f.pos + half
+	var best := f.pos
 	var best_d := -1.0
-	for k in 6:
+	for k in 10:
+		var p := _clamp_fish(f, here + Vector2(randf_range(-7.0, 7.0), randf_range(-3.5, 3.5)) - half)
+		var dd := dirt_at(p + half)
+		if dd > best_d:
+			best_d = dd
+			best = p
+	if best_d >= 0.12:
+		return best
+	for k in 14:
 		var p := _random_spot(f)
-		var dd := dirt_at(p + Vector2(f.w, f.h) * 0.5)
+		var dd := dirt_at(p + half)
 		if dd > best_d:
 			best_d = dd
 			best = p
@@ -744,12 +806,47 @@ func _eat(f: Fish) -> void:
 
 # The Dawa doesn't eat: a pat cheers it up, and every few pats teach it.
 func pat(f: Fish) -> void:
+	var was_full := f.hunger <= 0.0
+	if mood(f) != "":
+		f.pos.y = maxf(2.0, f.pos.y - 0.8)       # perks up with a little hop
 	f.hunger = maxf(0.0, f.hunger - Data.PAT_VALUE)
 	f.pats += 1
-	_popup("<3", f.pos + Vector2(f.w * 0.5, -0.6), Color("ff8fc8"))
+	if time - f.last_pat > 3.0:
+		f.overload = 0                          # the patting has to keep going
+	f.last_pat = time
+	var heart := "<3"
+	if was_full:
+		if f.super_time <= 0.0 and f.super_cd <= 0.0:
+			f.overload += 1
+			if f.overload >= Data.OVERLOAD_PATS:
+				_super_happy(f)
+				return
+		heart = "<3<3"                          # can't get any happier right now
+	else:
+		f.overload = 0
+	_popup(heart, f.pos + Vector2(f.w * 0.5, -0.6), Color("ff8fc8"))
 	sfx.emit("pat", 0.8)
 	if f.pats % Data.PATS_PER_XP == 0:
 		_gain_xp(f)
+
+
+# Happiness overload: a white flash, fireworks, and coins twice as often.
+func _super_happy(f: Fish) -> void:
+	f.overload = 0
+	f.super_time = Data.SUPER_TIME
+	f.super_cd = Data.SUPER_COOLDOWN
+	var c := f.pos + Vector2(f.w * 0.5, f.h * 0.5)
+	flashes.append({"pos": c, "life": 0.5})
+	var colors := [Color("ff8fc8"), Color("ffe066"), Color("ffffff"), Color("9ff0d0"), Color("b79ce0")]
+	for k in 26:
+		var a := randf() * TAU
+		var sp := randf_range(5.0, 13.0)
+		sparks.append({"pos": c, "vel": Vector2(cos(a) * sp, sin(a) * sp * 0.55), "life": randf_range(0.7, 1.4),
+			"glyph": "*+.',"[randi() % 5], "color": colors[randi() % colors.size()]})
+	var p := _popup("SUPER HAPPY!", c + Vector2(0, -1.5), Color("fff3a0"))
+	p.life = 2.2
+	sfx.emit("sparkle", 1.0)
+	_gain_xp(f)
 
 
 func _gain_xp(f: Fish) -> void:
@@ -910,6 +1007,18 @@ func _feeder_x() -> float:
 
 
 func _update_misc(dt: float) -> void:
+	for i in range(sparks.size() - 1, -1, -1):
+		var s: Dictionary = sparks[i]
+		s.life -= dt
+		s.vel *= pow(0.25, dt)                  # air... water resistance
+		s.vel.y += 5.0 * dt                     # then they drift down
+		s.pos += s.vel * dt
+		if s.life <= 0.0:
+			sparks.remove_at(i)
+	for i in range(flashes.size() - 1, -1, -1):
+		flashes[i].life -= dt
+		if flashes[i].life <= 0.0:
+			flashes.remove_at(i)
 	for i in range(popups.size() - 1, -1, -1):
 		var p: Dictionary = popups[i]
 		p.life -= dt
@@ -1381,6 +1490,16 @@ func _draw_top() -> void:
 
 # Above the grime.
 func _draw_overlay() -> void:
+	for fl in flashes:
+		var k: float = fl.life / 0.5
+		var c: Vector2 = origin + (fl.pos as Vector2) * cell
+		var r := cell.y * (2.0 + 4.0 * (1.0 - k))
+		_ci.draw_circle(c, r, Color(1, 1, 1, 0.18 * k))
+		_ci.draw_circle(c, r * 0.55, Color(1, 1, 1, 0.45 * k))
+	for s in sparks:
+		var col: Color = s.color
+		col.a = clampf(s.life / 0.5, 0.0, 1.0)
+		_put(s.pos.x, s.pos.y, s.glyph, col)
 	# Algae eaters cling to the glass, in front of the grime they graze.
 	for f: Fish in fishes:
 		if not f.dead and _is_cleaner(f):
@@ -1489,6 +1608,9 @@ func _cache_glyphs() -> void:
 func _draw_fish(f: Fish) -> void:
 	var sp: Dictionary = Data.SPECIES[f.species]
 	var spr_data: Dictionary = _sprites[f.species]
+	var mope := mood(f)
+	if mope != "" and _mood_sprites.has(f.species):
+		spr_data = _mood_sprites[f.species][mope]
 	var frames: Array = spr_data.r if f.facing > 0 else spr_data.l
 	var spr: Array = frames[int(f.anim) % frames.size()]
 	var mask: Array = spr_data.mr if f.facing > 0 else spr_data.ml
@@ -1498,6 +1620,11 @@ func _draw_fish(f: Fish) -> void:
 
 	var body: Color = sp.color
 	var accent: Color = sp.get("accent", body)
+	if f.super_time > 0.0:
+		# Super happy: colors slowly cycle through the rainbow.
+		var hue := fmod(time * 0.35 + f.phase, 1.0)
+		body = Color.from_hsv(hue, 0.45, 1.0)
+		accent = Color.from_hsv(fmod(hue + 0.12, 1.0), 0.65, 1.0)
 	var eye := Color("ffffff")
 	var dim := 0.0
 	if f.hunger >= 1.0:
@@ -1518,6 +1645,8 @@ func _draw_fish(f: Fish) -> void:
 		palette[key] = c
 
 	var bob := sin(time * 2.0 + f.phase) * 0.12
+	if f.super_time > 0.0:
+		bob -= absf(sin(time * 5.0 + f.phase)) * 0.45   # happy little hops
 	var blinking := f.blink > 0.0 or f.hunger >= 1.0
 
 	if f == hovered:
@@ -1551,7 +1680,10 @@ func _draw_fish(f: Fish) -> void:
 	# Hunger / starving marker above the head.
 	var head_x := f.pos.x + (f.w - 1 if f.facing > 0 else 0)
 	var lonely := Data.food_of(f.species) == "pat"
-	if lonely and f.hunger > 0.7 and not f.sick:
+	if f.super_time > 0.0:
+		var hx := clampf(head_x - (2 if f.facing > 0 else 0), 1.0, cols - 4.0)
+		_put(hx, f.pos.y - 1 + bob, "^-^", Color("fff3a0"))
+	elif lonely and f.hunger > 0.7 and not f.sick:
 		# A lonely Dawa sulks: ... then :( when it stops making coins.
 		var mark := ":(" if f.hunger >= 1.0 else "..."
 		var mx := clampf(head_x - (mark.length() - 1 if f.facing > 0 else 0), 1.0, cols - 1.0 - mark.length())

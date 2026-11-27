@@ -5,6 +5,14 @@ extends RefCounted
 
 const ENTRIES := [
 	{
+		"version": "0.4.1",
+		"notes": [
+			"A lonely Dawa droops: its head curves down, more the lonelier it gets. A pat perks it up.",
+			"Happiness overload: keep patting a fully happy Dawa and it bursts with joy. Super happy Dawas drop coins twice as often for a minute.",
+			"Algae eaters graze properly: they crawl along a patch of grime eating it, instead of swimming past it and starving. With dirt turned off they never go hungry.",
+		],
+	},
+	{
 		"version": "0.4.0",
 		"notes": [
 			"Food! Each fish eats only its own: flakes are free, pellets, shrimp and plankton come from the shop. The auto-feeder uses your stock, even while you're away.",

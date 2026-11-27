@@ -58,6 +58,19 @@ const SPECIES := [
 			["C==((}"],
 		],
 		"mask": ["a  aa"],
+		# A lonely Dawa droops: its head curves down, more the lonelier it is.
+		"moods": {
+			"sad": {
+				"frames": [["())=-.", "     D"], ["{))=-.", "     D"]],
+				"left": [[".-=(()", "C"], [".-=((}", "C"]],
+				"mask": ["a  aa"],
+			},
+			"sadder": {
+				"frames": [["())-.", "    \\", "     D"], ["{))-.", "    \\", "     D"]],
+				"left": [[" .-(()", " /", "C"], [" .-((}", " /", "C"]],
+				"mask": ["a  a"],
+			},
+		},
 	},
 	{
 		"name": "Classic", "icon": "><((((o>", "cost": 400, "value": 22, "interval": 8.0, "speed": 3.0,
@@ -225,6 +238,10 @@ const MEAL_SECONDS := 60.0                # a fed fish eats about this often
 const PAT_STROKE := 2.5
 const PAT_VALUE := 0.15                   # happiness per pat (a meal is 0.5)
 const PATS_PER_XP := 3
+# Happiness overload: keep patting a fully happy Dawa and it bursts with joy.
+const OVERLOAD_PATS := 6                  # extra pats in a row, when already full
+const SUPER_TIME := 60.0                  # super happy: coins twice as often
+const SUPER_COOLDOWN := 300.0             # from one burst to the next
 # Treats, bought and used at once. Priced from your income.
 const GOURMET_TIME := 600.0               # double XP from food and pats
 const GOLDEN_TIME := 300.0                # coins are worth more

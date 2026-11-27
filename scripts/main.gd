@@ -1751,6 +1751,13 @@ func _update_fish_card(cf) -> void:
 	elif cf.weak > 0.0:
 		status = "\nStill weak: no coins for %ds." % int(ceil(cf.weak))
 	status += _species_note(cf.species, "\n")
+	if Data.food_of(cf.species) == "pat":
+		if cf.super_time > 0.0:
+			status += "\nSUPER HAPPY! Coins twice as often for %ds." % int(ceil(cf.super_time))
+		elif cf.super_cd > 0.0:
+			status += "\nCan get super happy again in %s." % Data.fmt_time(cf.super_cd)
+		else:
+			status += "\nWhen it's fully happy, keep patting it..."
 	fish_card.update_stats("Level  %s\n%s [%s%s]\nDrops  $%s every %ss%s" % [
 		lv_txt, "Happy " if Data.food_of(cf.species) == "pat" else "Food  ", "#".repeat(bars), "-".repeat(10 - bars), Data.fmt(tank.fish_value(cf)),
 		str(Data.SPECIES[cf.species].interval), status], "Sell for $%s" % Data.fmt(sell_value(cf)),
@@ -2114,7 +2121,7 @@ func _offline_earnings(secs: float) -> void:
 		if k == "flakes" or (_save_predates_food and Data.PAID_FOODS.has(k)):
 			fed = 1.0 if upgrades.feeder > 0 else 0.0
 		elif k == "algae":
-			fed = 1.0 if dirt_after >= 0.1 else 0.0
+			fed = 1.0 if dirt_after >= 0.1 or not settings.values.dirt else 0.0
 		elif share.has(k):
 			fed = share[k]
 			if fed < 1.0:
