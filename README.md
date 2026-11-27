@@ -40,6 +40,7 @@ From v0.2.0 on, fishy checks GitHub for a new version a few seconds after launch
 - Individual fish cards for naming and inspecting fish, a fish list overlay (`L`) to jump to any fish, sell undo (`Ctrl+Z`), and lifetime stats.
 - Offline earnings for up to 12 hours while closed, plus optional system tray mode, battery saver (`10` FPS unfocused), and Start with Windows.
 - Automatic saving, rolling backups (last 10 kept), and save export/import built into Settings.
+- Food that matters: every fish eats only its own kind (free flakes, or pellets, shrimp and plankton from the shop), the auto-feeder draws from your stock, and the Dawa wants pats instead of food.
 - Dirty tanks: grime grows on the glass in random algae patches, and you scrub it off by hand in clean mode, with sponge physics (stroke speed, smearing, a sponge that fills up and needs rinsing).
 - Dirty water has consequences: fewer coins, sick fish, lost levels and, if left fully covered, dead fish you can revive with Fish Medicine or flush.
 - One-click updates from GitHub releases (always asks first), a per-user installer, and a "What's new" card after each update.
@@ -48,7 +49,9 @@ From v0.2.0 on, fishy checks GitHub for a new version a few seconds after launch
 
 Fish swim around the tank and drop `$` coins that sink to the sand. Click a coin, or drag across several, to collect them.
 
-Over time, fish get hungry and show a `?` above them. Click anywhere in the water to drop food `*`. Eating gives XP and levels a fish up (max level 5), increasing the value of every coin it drops. Starving fish (`!`) stop dropping coins until fed.
+Over time, fish get hungry and show a `?` above them. Click anywhere in the water to drop food. Eating gives XP and levels a fish up (max level 5), increasing the value of every coin it drops. Starving fish (`!`) stop dropping coins until fed.
+
+Each fish eats only its own food (see [Food](#food)).
 
 Spend coins in the shop on new fish and upgrades. Right-click or double-click any fish to name it, check its stats, or sell it (you have 8 seconds to undo a sale with `Ctrl+Z`).
 
@@ -76,12 +79,30 @@ Each species unlocks once you buy the one before it. The algae eater is always i
 
 **Jellyfish** don't swim: they pulse up in quick squeezes and sink slowly in between, drifting toward food rather than chasing it.
 
-**Algae eaters** swim to the dirtiest parts of the glass and graze the grime off as they go. Grazing on grime also feeds them, so in a dirty tank they rarely need pellets.
+**Algae eaters** swim to the dirtiest parts of the glass and graze the grime off as they go. Grime is the only thing they eat: in a spotless tank they go hungry.
 
 </details>
 
+## Food
+
+| Food | Glyph | Eaten by | Price |
+|---|---|---|---|
+| Flakes | `*` | Guppy | Free |
+| Pellets | `•` | Classic, Angel | Packs of 20, $30 each |
+| Shrimp | `c` | Puffer | Packs of 10, $500 each |
+| Plankton | `°` | Jellyfish | Packs of 10, $8,000 each |
+
+Prices grow with your coin multiplier (Minerals, Seaweed, Castle), so food stays about a fifth of what a fish earns between meals. Fish ignore food that isn't theirs. The first fish that needs a new food comes with a free pack.
+
+- A click drops whatever the hungriest fish nearby eats. The food bar next to the info line (or `Q`) picks a food yourself.
+- The auto-feeder drops each hungry fish's own food from your stock, also while the game is closed. When a food runs out, those fish go hungry and stop making coins (they don't die).
+- You can store 100 of each food; the **Food hopper** upgrade raises that to 250, 500 and 1,000.
+- The **Dawa** doesn't eat. When it's lonely (`...`), move the mouse back and forth over it to pat it: pats cheer it up and teach it like meals do. A neglected Dawa sulks (`:(`) and stops making coins.
+- **Algae eaters** eat only grime, **sharks** only guppies.
+- **Treats**, priced at two minutes of your income: Gourmet treat (double XP for 10 minutes) and Golden flakes (coins x1.5 for 5 minutes).
+
 <details>
-<summary>Upgrades (9)</summary>
+<summary>Upgrades (10)</summary>
 
 | Upgrade | Base cost | Max level | Effect |
 |---|---:|---:|---|
@@ -92,6 +113,7 @@ Each species unlocks once you buy the one before it. The algae eater is always i
 | Seaweed `)(` | $50 | 8 | +5% coin value per plant |
 | Castle `[~]` | $5,000 | 1 | +25% coin value |
 | Big sponge | $150 | 3 | +20% reach, +10% scrubbing strength and +50% grime held per level |
+| Food hopper | $500 | 3 | Stores more food: 100, 250, 500, 1,000 of each kind |
 | Filter `[=]` | $250 | 3 | Grime builds up 12% slower per level |
 | UV lamp | $25,000 | 1 | Grime builds up 20% slower |
 
@@ -153,6 +175,7 @@ Optional settings for running all day:
 | `1` to `8` | Buy fish (hold `Shift` to buy max) |
 | `F` | Feed every hungry fish |
 | `W` | Clean mode on / off |
+| `Q` | What a click drops: auto, or a food |
 | `Space` | Collect all coins |
 | `L` | Open fish list |
 | `S` | Toggle shop pop-up (compact layout) |

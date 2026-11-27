@@ -8,6 +8,7 @@ signal sfx(sound: String, gain: float)
 signal fish_died(fish)                # dirty water killed a fish
 signal spotless                       # scrubbed a dirty tank completely clean
 signal fish_eaten(prey, hunter)       # a shark ate a guppy
+signal food_out(kind)                 # wanted to drop a food that's sold out
 
 const Data = preload("res://scripts/data.gd")
 const Dirt = preload("res://scripts/dirt.gd")
@@ -86,6 +87,8 @@ class Fish extends RefCounted:
 	var revive_left := 0.0    # seconds left to revive (counts only while running)
 	var skeleton := false     # too late to revive; can only be flushed
 	var weak := 0.0           # just revived: no coins for a while
+	var pat_dist := 0.0       # Dawa: how far the mouse has stroked it since the last pat
+	var pats := 0
 
 
 var font: Font
@@ -98,7 +101,12 @@ var origin := Vector2.ZERO
 var ascent := 14.0
 
 var fishes: Array = []
-var foods: Array = []     # {pos, rest}
+var foods: Array = []     # {pos, rest, kind}
+var food_stock := {}      # paid food kind -> pieces in stock (the main scene saves it)
+var food_choice := "auto" # what a click drops: "auto" (what nearby fish need) or a kind
+var gourmet_time := 0.0   # treat: double XP
+var golden_time := 0.0    # treat: coins worth more
+var _out_warned := {}     # kind -> time of the last "sold out" warning
 var coins: Array = []     # {pos, value, landed, life}
 var bubbles: Array = []   # {pos, speed, seed}
 var popups: Array = []    # {text, pos, life, color}
@@ -308,6 +316,11 @@ func reset() -> void:
 	dirt.clear()
 	full_time = 0.0
 	boost_time = 0.0
+	gourmet_time = 0.0
+	golden_time = 0.0
+	for k in food_stock:
+		food_stock[k] = 0
+	food_choice = "auto"
 	sponge_load = 0.0
 	_dirt_peak = 0.0
 	fishes.clear()
@@ -334,6 +347,8 @@ func water_mult() -> float:
 	var m := Data.dirt_penalty(dirt.level) if dirt_enabled else 1.0
 	if boost_time > 0.0:
 		m *= Data.SPARKLE_BONUS
+	if golden_time > 0.0:
+		m *= Data.GOLDEN_BONUS
 	return m
 
 
@@ -440,10 +455,49 @@ func serialize_fish() -> Array:
 	return out
 
 
-func drop_food(p: Vector2) -> void:
-	if foods.size() >= 24:
-		return
-	foods.append({"pos": Vector2(clamp(p.x, 1.0, cols - 2.0), max(p.y, 2.0)), "rest": 0.0})
+# Drops one piece of food; paid food comes out of the stock. False when
+# there's none left (or the water is full of food already).
+func drop_food(p: Vector2, kind := "flakes") -> bool:
+	if not Data.FOODS.has(kind) or foods.size() >= 24:
+		return false
+	if kind != "flakes":
+		if int(food_stock.get(kind, 0)) <= 0:
+			_warn_out(kind)
+			return false
+		food_stock[kind] = int(food_stock[kind]) - 1
+	foods.append({"pos": Vector2(clamp(p.x, 1.0, cols - 2.0), max(p.y, 2.0)), "rest": 0.0, "kind": kind})
+	return true
+
+
+func _warn_out(kind: String) -> void:
+	if time - float(_out_warned.get(kind, -999.0)) > 30.0:
+		_out_warned[kind] = time
+		food_out.emit(kind)
+
+
+# The food this fish eats if it's something you drop, else "".
+static func drop_food_of(f) -> String:
+	var k := Data.food_of(f.species)
+	return k if Data.FOODS.has(k) else ""
+
+
+# What a click at p drops: the chosen food, or what the hungriest fish
+# nearby eats.
+func food_for_click(p: Vector2) -> String:
+	if food_choice != "auto":
+		return food_choice
+	var best := ""
+	var best_score := INF
+	for f: Fish in fishes:
+		var k := drop_food_of(f)
+		if f.dead or k == "":
+			continue
+		var d := p.distance_to(f.pos + Vector2(f.w, f.h) * 0.5)
+		var score := d - f.hunger * 25.0      # hungry fish count as much closer
+		if score < best_score:
+			best_score = score
+			best = k
+	return best if best != "" else "flakes"
 
 
 # ---------------------------------------------------------------- simulation
@@ -521,15 +575,18 @@ func _update_fish(dt: float) -> void:
 					break
 		elif _is_cleaner(f) and dirt_enabled:
 			# Grime is food too: grazing on it keeps an algae eater fed.
-			if dirt_at(center) > 0.25:
+			if dirt_at(center) > 0.15:
 				f.hunger = maxf(0.0, f.hunger - dt * 2.0 / Data.HUNGER_TIME)
 			dirt.nibble(_glass_uv(center), Vector2(2.2 / cols, 1.2 / maxf(1.0, sand_row())), (0.25 if f.sick else 0.5) * dt)
 
-		# Hungry fish chase the nearest food.
-		if not chasing and not hunter and f.hunger > 0.35 and not foods.is_empty():
+		# Hungry fish chase the nearest food of their own kind.
+		var my_food := drop_food_of(f)
+		if not chasing and my_food != "" and f.hunger > 0.35 and not foods.is_empty():
 			var best = null
 			var best_d := INF
 			for fd in foods:
+				if fd.kind != my_food:
+					continue
 				var d: float = center.distance_squared_to(fd.pos)
 				if d < best_d:
 					best_d = d
@@ -569,9 +626,9 @@ func _update_fish(dt: float) -> void:
 			if prey != null and rect.has_point(prey.pos + Vector2(prey.w, prey.h) * 0.5):
 				eaten.append(prey)
 				_devour(f, prey)
-		else:
+		elif my_food != "":
 			for i in range(foods.size() - 1, -1, -1):
-				if f.hunger > 0.05 and rect.has_point(foods[i].pos):
+				if f.hunger > 0.05 and foods[i].kind == my_food and rect.has_point(foods[i].pos):
 					foods.remove_at(i)
 					_eat(f)
 					break
@@ -682,9 +739,23 @@ func _update_dead(f: Fish, dt: float) -> void:
 func _eat(f: Fish) -> void:
 	# Sick fish only get half the good out of food, and learn nothing.
 	f.hunger = max(0.0, f.hunger - Data.FOOD_VALUE * (0.5 if f.sick else 1.0))
+	_gain_xp(f)
+
+
+# The Dawa doesn't eat: a pat cheers it up, and every few pats teach it.
+func pat(f: Fish) -> void:
+	f.hunger = maxf(0.0, f.hunger - Data.PAT_VALUE)
+	f.pats += 1
+	_popup("<3", f.pos + Vector2(f.w * 0.5, -0.6), Color("ff8fc8"))
+	sfx.emit("pat", 0.8)
+	if f.pats % Data.PATS_PER_XP == 0:
+		_gain_xp(f)
+
+
+func _gain_xp(f: Fish) -> void:
 	if f.level >= Data.MAX_LEVEL or f.sick:
 		return
-	f.xp += 1
+	f.xp += 2 if gourmet_time > 0.0 else 1
 	if f.xp >= Data.xp_needed(f.level):
 		f.xp = 0
 		f.level += 1
@@ -696,7 +767,7 @@ func _update_food(dt: float) -> void:
 	for i in range(foods.size() - 1, -1, -1):
 		var fd: Dictionary = foods[i]
 		if fd.pos.y < floor_y():
-			fd.pos.y = min(floor_y(), fd.pos.y + 1.6 * dt)
+			fd.pos.y = min(floor_y(), fd.pos.y + float(Data.FOODS[fd.kind].sink) * dt)
 			fd.pos.x += sin(time * 3.0 + fd.pos.y) * 0.4 * dt
 		else:
 			fd.rest += dt
@@ -818,16 +889,19 @@ func _update_feeder(dt: float) -> void:
 	var interval: float = Data.FEEDER_INTERVAL[min(feeder_level, Data.FEEDER_INTERVAL.size() - 1)]
 	if _feeder_timer < interval:
 		return
-	var anyone_hungry := false
+	var wanted := {}
 	for f in fishes:
-		if f.hunger > 0.4 and not f.dead and not is_hunter(f):
-			anyone_hungry = true
-			break
-	if anyone_hungry:
+		var k := drop_food_of(f)
+		if f.hunger > 0.4 and not f.dead and k != "":
+			wanted[k] = true
+	var dropped := 0
+	var fx := _feeder_x() + 1.5
+	for k in wanted:
+		for n in 2:
+			if drop_food(Vector2(fx + randf_range(-1.0, 1.0), 2.0), k):
+				dropped += 1
+	if dropped > 0:
 		_feeder_timer = 0.0
-		var fx := _feeder_x() + 1.5
-		for k in 2:
-			drop_food(Vector2(fx + randf_range(-1.0, 1.0), 2.0))
 		sfx.emit("food", 0.25)
 
 
@@ -869,6 +943,8 @@ func _buried(c: Dictionary) -> bool:
 
 func _update_dirt(dt: float) -> void:
 	boost_time = maxf(0.0, boost_time - dt)
+	gourmet_time = maxf(0.0, gourmet_time - dt)
+	golden_time = maxf(0.0, golden_time - dt)
 	if not dirt_enabled:
 		full_time = 0.0
 		for f in fishes:
@@ -1071,6 +1147,7 @@ func _gui_input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion:
 		if event.button_mask & MOUSE_BUTTON_MASK_LEFT:
 			_collect_near(mouse_cell)   # drag over coins to scoop them up
+		_stroke(event.relative)
 		_update_cursor()
 	elif event is InputEventMouseButton and event.pressed:
 		if event.button_index == MOUSE_BUTTON_LEFT:
@@ -1081,15 +1158,26 @@ func _gui_input(event: InputEvent) -> void:
 					accept_event()
 					return
 			if _collect_near(mouse_cell) == 0 and in_water(mouse_cell):
-				drop_food(mouse_cell - Vector2(0.5, 0.5))
-				sfx.emit("food", 1.0)
-				player_food += 1
+				if drop_food(mouse_cell - Vector2(0.5, 0.5), food_for_click(mouse_cell)):
+					sfx.emit("food", 1.0)
+					player_food += 1
 			accept_event()
 		elif event.button_index == MOUSE_BUTTON_RIGHT:
 			var f := _fish_at(mouse_cell)
 			if f != null:
 				fish_opened.emit(f)
 			accept_event()
+
+
+# Moving the mouse back and forth over a Dawa pats it.
+func _stroke(rel: Vector2) -> void:
+	var f := _fish_at(mouse_cell)
+	if f == null or f.dead or Data.food_of(f.species) != "pat":
+		return
+	f.pat_dist += absf(rel.x) / cell.x + absf(rel.y) / cell.y * 0.5
+	if f.pat_dist >= Data.PAT_STROKE:
+		f.pat_dist = 0.0
+		pat(f)
 
 
 # Clean mode: hold left and drag to scrub, right-click to rinse the sponge.
@@ -1239,7 +1327,8 @@ func _draw() -> void:
 		_put(_feeder_x(), 1, "[::]", C_FEEDER)
 
 	for fd in foods:
-		_put(fd.pos.x, fd.pos.y, "*", C_FOOD)
+		var fk: Dictionary = Data.FOODS[fd.kind]
+		_put(fd.pos.x, fd.pos.y, fk.glyph, fk.color)
 
 	for b in bubbles:
 		var prog: float = 1.0 - (b.pos.y - 2.0) / max(1.0, floor_y() - 2.0)
@@ -1461,7 +1550,13 @@ func _draw_fish(f: Fish) -> void:
 
 	# Hunger / starving marker above the head.
 	var head_x := f.pos.x + (f.w - 1 if f.facing > 0 else 0)
-	if f.hunger >= 1.0:
+	var lonely := Data.food_of(f.species) == "pat"
+	if lonely and f.hunger > 0.7 and not f.sick:
+		# A lonely Dawa sulks: ... then :( when it stops making coins.
+		var mark := ":(" if f.hunger >= 1.0 else "..."
+		var mx := clampf(head_x - (mark.length() - 1 if f.facing > 0 else 0), 1.0, cols - 1.0 - mark.length())
+		_put(mx, f.pos.y - 1 + bob, mark, Color("ff8fc8") if f.hunger < 1.0 else Color("ff5c5c"))
+	elif f.hunger >= 1.0:
 		_put(head_x, f.pos.y - 1 + bob, "!", Color("ff5c5c"))
 	elif f.sick:
 		_put(head_x, f.pos.y - 1 + bob, "~", C_SICK)

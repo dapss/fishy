@@ -36,6 +36,7 @@ const DIRT_PENALTY := [[0.0, 1.0], [0.3, 0.9], [0.6, 0.7], [0.85, 0.4], [1.0, 0.
 const SPECIES := [
 	{
 		"name": "Guppy", "icon": "><'>", "cost": 10, "value": 1, "interval": 5.0, "speed": 4.0,
+		"food": "flakes",
 		"color": Color("7fdbff"), "accent": Color("ff7ad9"),
 		"frames": [
 			["><'>"],
@@ -44,7 +45,9 @@ const SPECIES := [
 		"mask": ["aae"],
 	},
 	{
+		# Doesn't eat at all: it wants pats (stroke it with the mouse).
 		"name": "Dawa", "icon": "())==D", "cost": 75, "value": 5, "interval": 7.0, "speed": 3.5,
+		"food": "pat",
 		"color": Color("ffb347"), "accent": Color("ff6b4a"),
 		"frames": [
 			["())==D"],
@@ -58,6 +61,7 @@ const SPECIES := [
 	},
 	{
 		"name": "Classic", "icon": "><((((o>", "cost": 400, "value": 22, "interval": 8.0, "speed": 3.0,
+		"food": "pellets",
 		"color": Color("ff8c42"), "accent": Color("ffd166"),
 		"frames": [
 			[
@@ -79,6 +83,7 @@ const SPECIES := [
 	},
 	{
 		"name": "Angel", "icon": "><(::o>", "cost": 2000, "value": 90, "interval": 9.0, "speed": 2.5,
+		"food": "pellets",
 		"color": Color("eef0f8"), "accent": Color("b79ce0"),
 		"frames": [
 			[
@@ -106,6 +111,7 @@ const SPECIES := [
 	},
 	{
 		"name": "Puffer", "icon": "><( :: o)", "cost": 10000, "value": 400, "interval": 10.0, "speed": 2.0,
+		"food": "shrimp",
 		"color": Color("f9e264"), "accent": Color("e0913a"),
 		"frames": [
 			[
@@ -129,6 +135,7 @@ const SPECIES := [
 		# Sharks don't eat pellets: a hungry shark hunts guppies (not named ones).
 		"name": "Shark", "icon": ">=|||  o`-.", "cost": 60000, "value": 2200, "interval": 12.0, "speed": 4.5,
 		"prey": 0,
+		"food": "guppies",
 		"color": Color("8fa3b8"), "accent": Color("5f7389"),
 		"frames": [
 			[
@@ -157,6 +164,7 @@ const SPECIES := [
 		"name": "Algae eater", "icon": "=<(##)o", "cost": 400, "value": 3, "interval": 8.0, "speed": 2.0,
 		"color": Color("b08a5a"), "accent": Color("6b5a2a"),
 		"cleaner": true,
+		"food": "algae",
 		"frames": [
 			[
 				"   _/\\_    ",
@@ -178,6 +186,7 @@ const SPECIES := [
 		"name": "Jellyfish", "icon": "(o.o)", "cost": 350000, "value": 10000, "interval": 14.0, "speed": 1.0,
 		"color": Color("e7a6ff"), "accent": Color("b07ad9"),
 		"drifter": true,
+		"food": "plankton",
 		"frames": [
 			[
 				" .-. ",
@@ -197,6 +206,35 @@ const SPECIES := [
 		],
 	},
 ]
+
+# Food you drop in the water. Every fish eats only its own kind (the
+# species' "food"); the others aren't dropped: "pat" (the Dawa), "algae"
+# (the algae eater grazes grime) and "guppies" (the shark hunts).
+# price is per piece, before it scales with your coin multiplier, and is
+# about a fifth of what the fish earns between two meals.
+const FOODS := {
+	"flakes": {"name": "Flakes", "glyph": "*", "color": Color("d98c4a"), "price": 0.0, "pack": 0, "sink": 1.6},
+	"pellets": {"name": "Pellets", "glyph": "\u2022", "color": Color("d6b27a"), "price": 30.0, "pack": 20, "sink": 1.8},
+	"shrimp": {"name": "Shrimp", "glyph": "c", "color": Color("ff8f7a"), "price": 500.0, "pack": 10, "sink": 1.4},
+	"plankton": {"name": "Plankton", "glyph": "\u00b0", "color": Color("9ff0d0"), "price": 8000.0, "pack": 10, "sink": 0.5},
+}
+const PAID_FOODS := ["pellets", "shrimp", "plankton"]
+const FOOD_CAP := [100, 250, 500, 1000]   # pieces of each food you can store, by Food hopper level
+const MEAL_SECONDS := 60.0                # a fed fish eats about this often
+# Patting the Dawa: stroke this many cells over it for one pat.
+const PAT_STROKE := 2.5
+const PAT_VALUE := 0.15                   # happiness per pat (a meal is 0.5)
+const PATS_PER_XP := 3
+# Treats, bought and used at once. Priced from your income.
+const GOURMET_TIME := 600.0               # double XP from food and pats
+const GOLDEN_TIME := 300.0                # coins are worth more
+const GOLDEN_BONUS := 1.5
+const TREAT_PRICE_SECONDS := 120.0        # a treat costs this many seconds of income
+
+
+static func food_of(species: int) -> String:
+	return SPECIES[species].get("food", "flakes")
+
 
 # Species indexes are saved, so new species go at the end of the list.
 const ALGAE_EATER := 6
@@ -236,6 +274,10 @@ const UPGRADES := {
 	"sponge": {
 		"short": "Sponge", "name": "Big sponge", "base": 150, "growth": 4.0, "max": 3,
 		"desc": "A bigger, tougher sponge: wider strokes, scrubs harder, holds more grime before it needs a rinse.",
+	},
+	"hopper": {
+		"short": "Hopper", "name": "Food hopper", "base": 500, "growth": 3.0, "max": 3,
+		"desc": "Stores more food: 100 -> 250 -> 500 -> 1000 of each kind.",
 	},
 	"filter": {
 		"short": "Filter", "name": "Filter [=]", "base": 250, "growth": 2.5, "max": 3,

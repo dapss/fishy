@@ -7,8 +7,11 @@ const ENTRIES := [
 	{
 		"version": "0.4.0",
 		"notes": [
+			"Food! Each fish eats only its own: flakes are free, pellets, shrimp and plankton come from the shop. The auto-feeder uses your stock, even while you're away.",
+			"The Dawa doesn't eat anymore: pat it (move the mouse back and forth over it) when it's lonely.",
+			"Treats: Gourmet (double XP) and Golden flakes (x1.5 coins). New upgrade: Food hopper stores more food.",
 			"New fish: the Jellyfish, after the Shark. It pulses up and drifts down instead of swimming.",
-			"Algae eaters are fish now (key 8): they graze grime off the glass, and the grime feeds them. Your old ones moved in.",
+			"Algae eaters are fish now (key 8): they eat only grime, grazing it off the glass. Your old ones moved in.",
 			"Sharks don't eat pellets anymore: they hunt guppies. Name a guppy to keep it safe.",
 			"New upgrade: Big sponge. Wider strokes, scrubs harder, needs rinsing less often.",
 			"Dirty tanks no longer slow the game down.",
