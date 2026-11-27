@@ -133,9 +133,22 @@ func _on_update() -> void:
 
 
 # GitHub release notes are Markdown; show them as plain text, not too long.
+# They're written for the release page, so they also say how to download;
+# in the game only the "What's new" part matters.
 func _clean_notes(md: String) -> String:
+	var lines := md.replace("\r", "").split("\n")
+	var section := []
+	var in_new := false
+	for line in lines:
+		var l := line.strip_edges()
+		if l.begins_with("#"):
+			in_new = l.to_lower().contains("new")
+		elif in_new:
+			section.append(line)
+	if not section.is_empty():
+		lines = PackedStringArray(section)
 	var out := []
-	for line in md.replace("\r", "").split("\n"):
+	for line in lines:
 		var l := line.strip_edges()
 		if l == "":
 			continue
