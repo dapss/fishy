@@ -5,6 +5,13 @@ extends RefCounted
 
 const ENTRIES := [
 	{
+		"version": "0.4.2",
+		"notes": [
+			"Fixed: patting a fully happy Dawa into a happiness overload now works.",
+			"Algae eaters are smarter: they head for the thickest grime nearby, graze with their mouth so they reach the edges of the glass too, and several of them spread out over different patches.",
+		],
+	},
+	{
 		"version": "0.4.1",
 		"notes": [
 			"A lonely Dawa droops: its head curves down, more the lonelier it gets. A pat perks it up.",

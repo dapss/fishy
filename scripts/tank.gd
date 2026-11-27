@@ -56,9 +56,11 @@ const C_CHOMP := Color("ff6b6b")
 const HUNT_AT := 0.5              # sharks hunt once this hungry: about a guppy a minute
 # Algae eaters: how much glass they scrape (cells), how hard, and how much
 # the grime they eat fills them up.
-const GRAZE_RADIUS := Vector2(2.2, 1.2)
-const GRAZE_POWER := 0.6
+const GRAZE_RADIUS := Vector2(2.2, 1.5)
+const GRAZE_POWER := 0.5
 const GRAZE_FOOD := 0.06
+const GRAZE_DONE := 0.08          # grime thinner than this isn't worth staying for
+const FULL_ENOUGH := 0.05         # a Dawa this close to fully happy counts as full
 const GRIME := [".", ".,", ":;", ";%", "%&", "#&%", "#@&"]
 # Sponge physics. Speeds are in cells per second.
 const SPONGE_POWER := 0.75        # share of the grime one slow pass takes
@@ -98,6 +100,8 @@ class Fish extends RefCounted:
 	var last_pat := -99.0
 	var super_time := 0.0     # super happy: coins twice as often
 	var super_cd := 0.0       # until it can get super happy again
+	var grazed: Array = []    # algae eater: spots it just finished, {p, t}, to skip for a while
+	var graze_face := 0       # algae eater: which way to face at its target (mouth to the grime)
 
 
 var font: Font
@@ -602,13 +606,23 @@ func _update_fish(dt: float) -> void:
 				# No grime with dirt turned off: there's always some algae about.
 				f.hunger = maxf(0.0, f.hunger - dt * 2.0 / Data.HUNGER_TIME)
 			else:
-				# Grime is its food: what it scrapes off the glass feeds it.
-				var got := dirt.wipe(_glass_uv(center), _glass_uv(center), GRAZE_RADIUS / Vector2(cols, maxf(1.0, sand_row())),
+				# Grime is its food: what its mouth scrapes off the glass feeds it.
+				# Close to its spot it turns its mouth to the grime.
+				if f.graze_face != 0 and f.pos.distance_to(f.target) < 1.5:
+					f.facing = f.graze_face
+				var mouth := _mouth(f, f.pos, f.facing)
+				var got := dirt.wipe(_glass_uv(mouth), _glass_uv(mouth), GRAZE_RADIUS / Vector2(cols, maxf(1.0, sand_row())),
 					GRAZE_POWER * (0.5 if f.sick else 1.0) * dt, 0.0)
 				f.hunger = maxf(0.0, f.hunger - minf(got * GRAZE_FOOD, dt * 3.0 / Data.HUNGER_TIME))
 				# Crawl slowly over grime, swim normally between patches.
-				if dirt_at(center) > 0.12:
+				var here := _graze_value(mouth)
+				if here > 0.12:
 					spd *= 0.35
+				elif here < GRAZE_DONE and f.pos.distance_to(f.target) < 1.0:
+					# Eaten clean (or nothing it can reach): remember the spot
+					# so it doesn't come straight back, and find the next patch.
+					f.grazed.append({"p": mouth, "t": time})
+					f.wander_timer = 0.0
 
 		# Hungry fish chase the nearest food of their own kind.
 		var my_food := drop_food_of(f)
@@ -760,30 +774,85 @@ func _devour(h: Fish, prey: Fish) -> void:
 
 
 # Algae eaters head for the dirtiest of a few random spots on the glass.
-# Algae eaters work their way along a patch: the dirtiest spot close by,
-# or, when everything near is clean, the dirtiest of a few spots anywhere.
+# Algae eaters look over the whole glass for the best patch to eat next:
+# thick grime scores high, far away scores lower (so they work along a
+# patch instead of zig-zagging), and a patch another algae eater is
+# already heading for scores lower too, so they spread out.
 func _graze_spot(f: Fish) -> Vector2:
-	if not dirt_enabled or dirt.level < 0.01:
+	if not dirt_enabled or dirt.level < 0.005:
+		f.graze_face = 0
 		return _random_spot(f)
-	var half := Vector2(f.w, f.h) * 0.5
-	var here := f.pos + half
-	var best := f.pos
-	var best_d := -1.0
-	for k in 10:
-		var p := _clamp_fish(f, here + Vector2(randf_range(-7.0, 7.0), randf_range(-3.5, 3.5)) - half)
-		var dd := dirt_at(p + half)
-		if dd > best_d:
-			best_d = dd
-			best = p
-	if best_d >= 0.12:
-		return best
-	for k in 14:
-		var p := _random_spot(f)
-		var dd := dirt_at(p + half)
-		if dd > best_d:
-			best_d = dd
-			best = p
+	var here := _mouth(f, f.pos, f.facing)
+	for k in range(f.grazed.size() - 1, -1, -1):
+		if time - float(f.grazed[k].t) > 25.0:
+			f.grazed.remove_at(k)
+	var others := []
+	for o: Fish in fishes:
+		if o != f and not o.dead and _is_cleaner(o):
+			others.append(o.target + Vector2(o.w, o.h) * 0.5)
+	var W: int = Dirt.W
+	var H: int = Dirt.H
+	var gw := float(cols - 2)
+	var gh := float(sand_row() - 1)
+	var best := Vector2(-1, -1)
+	var best_score := -INF
+	# Look at every other grid cell. It grazes with its mouth, at the front,
+	# so it heads there mouth first: that way it can press right up to the
+	# side walls. Judge each spot by what the mouth can reach from as close
+	# as the fish can get.
+	for gy in range(0, H - 1, 2):
+		for gx in range(0, W - 1, 2):
+			var i := gy * W + gx
+			if (dirt.d[i] + dirt.d[i + 1] + dirt.d[i + W] + dirt.d[i + W + 1]) * 0.25 < GRAZE_DONE:
+				continue
+			var p := Vector2(0.5 + (gx + 1.0) / W * gw, 0.5 + (gy + 1.0) / H * gh)
+			var face := 1 if p.x >= here.x else -1
+			var pos := _clamp_fish(f, p - (_mouth(f, Vector2.ZERO, face)))
+			var q := _mouth(f, pos, face)
+			var v := _graze_value(q)
+			if v < GRAZE_DONE:
+				continue
+			var done := false
+			for g in f.grazed:
+				if (g.p as Vector2).distance_to(q) < 3.0:
+					done = true
+					break
+			if done:
+				continue
+			var d := Vector2(q.x - here.x, (q.y - here.y) * 2.0).length()   # rows are tall
+			var score := v - d * 0.006
+			for o: Vector2 in others:
+				if o.distance_to(q) < 8.0:
+					score -= 0.35
+			if score > best_score:
+				best_score = score
+				best = pos
+				f.graze_face = face
+	if best.x < 0.0:
+		f.graze_face = 0
+		return _random_spot(f)
 	return best
+
+
+# How much grime a mouth at p can scrape: the average over the same patch
+# of glass that grazing wipes (a few points across it).
+func _graze_value(p: Vector2) -> float:
+	var r := GRAZE_RADIUS * 0.55
+	var s := 0.0
+	for o in [Vector2.ZERO, Vector2(r.x, 0), Vector2(-r.x, 0), Vector2(0, r.y), Vector2(0, -r.y)]:
+		var uv := _glass_uv(p + o)
+		s += dirt.sample(clampf(uv.x, 0.0, 1.0), clampf(uv.y, 0.0, 1.0))
+	return s / 5.0
+
+
+# Where an algae eater's mouth is (the o at its front) for a fish at pos.
+# Up at the waterline it reaches up, down by the sand it reaches down, so
+# it can scrape the very top and bottom of the glass too.
+func _mouth(f: Fish, pos: Vector2, facing: int) -> Vector2:
+	var lo := 2.0
+	var hi := maxf(lo + 0.01, float(sand_row() - f.h))
+	var t := clampf((pos.y - lo) / (hi - lo), 0.0, 1.0)
+	return pos + Vector2(f.w - 1.0 if facing > 0 else 1.0, lerpf(0.0, f.h - 0.4, t))
 
 
 # Dead fish float up to the surface and bob there. The revive window only
@@ -806,7 +875,8 @@ func _eat(f: Fish) -> void:
 
 # The Dawa doesn't eat: a pat cheers it up, and every few pats teach it.
 func pat(f: Fish) -> void:
-	var was_full := f.hunger <= 0.0
+	# Happiness drains a little every frame, so "full" means nearly full.
+	var was_full := f.hunger < FULL_ENOUGH
 	if mood(f) != "":
 		f.pos.y = maxf(2.0, f.pos.y - 0.8)       # perks up with a little hop
 	f.hunger = maxf(0.0, f.hunger - Data.PAT_VALUE)
