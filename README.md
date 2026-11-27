@@ -16,9 +16,16 @@ An ASCII fish tank idle game for Windows that doubles as a desktop widget.
 
 ## Download
 
-1. Download the latest Windows zip from [Releases](https://github.com/dapss/fishy/releases).
-2. Unzip it anywhere.
-3. Run `fishy.exe`. No installer is needed.
+Get the latest version from [Releases](https://github.com/dapss/fishy/releases/latest):
+
+- **Installer (recommended):** run `fishy-setup-vX.Y.Z.exe`. It installs fishy for your user only (no admin prompt) into `%LOCALAPPDATA%\Programs\fishy` and adds a Start menu entry. Uninstall it from **Settings > Apps** like any other program.
+- **Portable zip:** unzip `fishy-vX.Y.Z-windows.zip` anywhere and run `fishy.exe`.
+
+Your save is stored separately (see [Saves and Backups](#saves-and-backups)), so switching between the two, updating, or uninstalling never touches your progress.
+
+### Updates
+
+From v0.2.0 on, fishy checks GitHub for a new version a few seconds after launch. If one is out, it shows what's new and asks first: **Update and restart** downloads the new `fishy.exe`, swaps it in and restarts, and **Later** leaves everything as is. You can also check from **Settings > Check for update**, or turn the launch check off. If you're on v0.1.0, download v0.2.0 once by hand.
 
 > [!NOTE]
 > `fishy.exe` is not code-signed, so Windows Defender SmartScreen may show a warning on first launch. Click **More info**, then **Run anyway**.
@@ -33,6 +40,7 @@ An ASCII fish tank idle game for Windows that doubles as a desktop widget.
 - Individual fish cards for naming and inspecting fish, a fish list overlay (`L`) to jump to any fish, sell undo (`Ctrl+Z`), and lifetime stats.
 - Offline earnings for up to 12 hours while closed, plus optional system tray mode, battery saver (`10` FPS unfocused), and Start with Windows.
 - Automatic saving, rolling backups (last 10 kept), and save export/import built into Settings.
+- One-click updates from GitHub releases (always asks first), plus a per-user installer.
 
 ## How to Play
 
@@ -125,7 +133,7 @@ The game saves every 30 seconds and immediately after purchases, upgrades, and s
 
 - `fishy_save.json` holds your tank, money, upgrades, and stats.
 - `settings.cfg` is stored separately so resetting a save keeps your window layout and preferences.
-- `backups/` stores automatic rolling backups (taken on launch if the last one is older than 10 minutes, and every 15 minutes while running; the last 10 are kept).
+- `backups/` stores automatic rolling backups (taken on launch if the last one is older than 10 minutes, every 15 minutes while running, and before an update, import, or reset; the last 10 are kept).
 
 From **Settings > Save**, you can export a save file to move it to another PC, import a save or backup, open the backups folder, or reset your progress.
 
@@ -147,6 +155,14 @@ To export a standalone Windows binary (uses the `Windows Desktop` preset in `exp
 godot --headless --export-release "Windows Desktop"
 ```
 
+To build the installer, install [Inno Setup 6](https://jrsoftware.org/isinfo.php) and run (outputs `build/fishy-setup-v0.2.0.exe`):
+
+```powershell
+ISCC.exe /DAppVersion=0.2.0 installer\fishy.iss
+```
+
+When publishing a release, tag it `vX.Y.Z` (matching `application/config/version` in `project.godot`) and upload the installer, the zip, and the bare `fishy.exe`. The in-game updater downloads the asset named exactly `fishy.exe`.
+
 <details>
 <summary>Project structure</summary>
 
@@ -158,6 +174,8 @@ fishy/
 ├── export_presets.cfg        # Windows x64 single-exe export preset
 ├── main.tscn                 # Root scene entry point
 ├── icon.svg                  # App and tray icon
+├── installer/
+│   └── fishy.iss             # Inno Setup script (per-user installer)
 └── scripts/
     ├── main.gd               # Game loop, HUD, shop, window/widget modes, tray, saves & backups
     ├── tank.gd               # Character-grid ASCII simulation and renderer
@@ -169,6 +187,8 @@ fishy/
     ├── fish_list.gd          # Fish roster overlay
     ├── help_card.gd          # In-game help and shortcut card
     ├── info_card.gd          # Offline earnings and lifetime stats modal
+    ├── updater.gd            # GitHub release check, download, and exe swap
+    ├── update_card.gd        # "New version" prompt with progress
     └── resize_grip.gd        # Corner resize handle for borderless mode
 ```
 
