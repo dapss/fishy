@@ -53,6 +53,7 @@ var food_flow: HFlowContainer
 var food_buttons := {}            # paid food kind -> Button
 var treat_buttons := {}           # "gourmet" / "golden" -> Button
 var _save_predates_dirt := false         # true when the save predates dirty tanks
+var _save_predates_food := false         # true when the save predates bought food
 
 var settings := Settings.new()
 var audio
@@ -2039,7 +2040,8 @@ func _load_food(d: Dictionary) -> void:
 		for k in seen:
 			if Data.PAID_FOODS.has(String(k)):
 				food_seen[String(k)] = true
-	if typeof(stock) != TYPE_DICTIONARY:
+	_save_predates_food = typeof(stock) != TYPE_DICTIONARY
+	if _save_predates_food:
 		# A save from before food was sold: two free packs of each food you need.
 		for f in tank.fishes:
 			var k := Data.food_of(f.species)
@@ -2089,7 +2091,8 @@ func _offline_earnings(secs: float) -> void:
 	# The feeder feeds from your stock while you're away: share out what
 	# there is between the fish that eat each food.
 	var need := {}
-	if upgrades.feeder > 0:
+	# Time away from before food was sold counts as fed for free.
+	if upgrades.feeder > 0 and not _save_predates_food:
 		for f in tank.fishes:
 			var k := Data.food_of(f.species)
 			if not f.dead and Data.PAID_FOODS.has(k):
@@ -2108,7 +2111,7 @@ func _offline_earnings(secs: float) -> void:
 		var k := Data.food_of(f.species)
 		var full_for := maxf(0.0, (1.0 - f.hunger) * Data.HUNGER_TIME)
 		var fed := 0.0           # share of the time after that the fish was fed
-		if k == "flakes":
+		if k == "flakes" or (_save_predates_food and Data.PAID_FOODS.has(k)):
 			fed = 1.0 if upgrades.feeder > 0 else 0.0
 		elif k == "algae":
 			fed = 1.0 if dirt_after >= 0.1 else 0.0
