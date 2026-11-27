@@ -4,6 +4,8 @@ extends Control
 
 signal money_earned(amount: float)
 signal sell_requested(fish)
+signal fish_opened(fish)              # double-clicked a fish
+signal sfx(sound: String, gain: float)
 
 const Data = preload("res://scripts/data.gd")
 
@@ -12,6 +14,9 @@ const MIRROR := {
 	"{": "}", "}": "{", "/": "\\", "\\": "/", "b": "d", "d": "b", "p": "q", "q": "p",
 }
 const SAND := ".,_.:',._,.;"
+const MIN_ROWS := 12
+const MIN_COLS := 34
+const MIN_FONT := 9
 const SNAIL_RIGHT := "_@'"
 const SNAIL_LEFT := "'@_"
 const CASTLE := [
@@ -57,9 +62,11 @@ class Fish extends RefCounted:
 	var anim := 0.0           # animation clock; advances faster while swimming fast
 	var blink := 0.0          # >0 while the eyes are closed
 	var next_blink := 3.0
+	var nickname := ""
 
 
 var font: Font
+var base_font_size := 16      # wanted size; font_size may shrink to fit
 var font_size := 16
 var cell := Vector2(9, 18)
 var cols := 80
@@ -108,12 +115,18 @@ func _ready() -> void:
 func _recalc_grid() -> void:
 	if font == null:
 		return
+	# Use the wanted size, but step down until the tank fits a minimum grid,
+	# so small widget windows don't cut off the sand.
+	font_size = base_font_size
+	while font_size > MIN_FONT and (size.y < MIN_ROWS * font.get_height(font_size) \
+			or size.x < MIN_COLS * font.get_char_size(ord("M"), font_size).x):
+		font_size -= 1
 	cell = Vector2(font.get_char_size(ord("M"), font_size).x, font.get_height(font_size))
 	cell.x = max(cell.x, 4.0)
 	cell.y = max(cell.y, 8.0)
 	ascent = font.get_ascent(font_size)
-	cols = max(30, int(size.x / cell.x))
-	rows = max(12, int(size.y / cell.y))
+	cols = max(MIN_COLS, int(size.x / cell.x))
+	rows = max(MIN_ROWS, int(size.y / cell.y))
 	origin = ((size - Vector2(cols, rows) * cell) * 0.5).floor()
 	for f in fishes:
 		f.pos = _clamp_fish(f, f.pos)
@@ -218,6 +231,7 @@ func add_fish(species: int, level := 0, xp := 0, hunger := 0.2, splash := false)
 	if splash:
 		f.pos = _clamp_fish(f, Vector2(randf_range(2, cols - 2 - f.w), 2))
 		_popup("*splash*", f.pos + Vector2(f.w * 0.5, -0.5), C_SURFACE)
+		sfx.emit("splash", 1.0)
 	else:
 		f.pos = _random_spot(f)
 	f.target = _random_spot(f)
@@ -281,7 +295,7 @@ func set_weeds(n: int) -> void:
 func serialize_fish() -> Array:
 	var out := []
 	for f in fishes:
-		out.append({"s": f.species, "lv": f.level, "xp": f.xp, "hg": snappedf(f.hunger, 0.001)})
+		out.append({"s": f.species, "lv": f.level, "xp": f.xp, "hg": snappedf(f.hunger, 0.001), "n": f.nickname})
 	return out
 
 
@@ -378,6 +392,7 @@ func _eat(f: Fish) -> void:
 		f.xp = 0
 		f.level += 1
 		_popup("LVL %d!" % f.level, f.pos + Vector2(f.w * 0.5, -0.6), Color("9dff9d"))
+		sfx.emit("level", 1.0)
 
 
 func _update_food(dt: float) -> void:
@@ -471,7 +486,7 @@ func _update_snails(dt: float) -> void:
 		for j in range(coins.size() - 1, -1, -1):
 			var c: Dictionary = coins[j]
 			if c.landed and abs(c.pos.x - (s.x + 1.0)) < 1.6:
-				_collect(j)
+				_collect(j, true)
 
 
 func _update_bubbles(dt: float) -> void:
@@ -511,6 +526,7 @@ func _update_feeder(dt: float) -> void:
 		var fx := _feeder_x() + 1.5
 		for k in 2:
 			drop_food(Vector2(fx + randf_range(-1.0, 1.0), 2.0))
+		sfx.emit("food", 0.25)
 
 
 func _feeder_x() -> float:
@@ -544,10 +560,11 @@ func _fish_at(p: Vector2) -> Fish:
 	return null
 
 
-func _collect(i: int) -> void:
+func _collect(i: int, by_snail := false) -> void:
 	var c: Dictionary = coins[i]
 	coins.remove_at(i)
 	money_earned.emit(c.value)
+	sfx.emit("coin", 0.3 if by_snail else 1.0)
 	# Collections close together in time and space add up into one popup.
 	for p in popups:
 		if p.has("amount") and p.life > 0.7 and abs(p.pos.x - c.pos.x) < 8.0 and abs(p.pos.y - c.pos.y) < 3.0:
@@ -574,13 +591,21 @@ func _popup(text: String, p: Vector2, color: Color) -> Dictionary:
 func _gui_input(event: InputEvent) -> void:
 	if event is InputEventMouse:
 		mouse_cell = (event.position - origin) / cell
-	if event is InputEventMouseMotion and (event.button_mask & MOUSE_BUTTON_MASK_LEFT):
-		_collect_near(mouse_cell)   # drag over coins to scoop them up
+	if event is InputEventMouseMotion:
+		if event.button_mask & MOUSE_BUTTON_MASK_LEFT:
+			_collect_near(mouse_cell)   # drag over coins to scoop them up
+		_update_cursor()
 	elif event is InputEventMouseButton and event.pressed:
 		if event.button_index == MOUSE_BUTTON_LEFT:
-			if _collect_near(mouse_cell) == 0:
-				if mouse_cell.y > 1.5 and mouse_cell.y < sand_row() and mouse_cell.x > 1 and mouse_cell.x < cols - 1:
-					drop_food(mouse_cell - Vector2(0.5, 0.5))
+			if event.double_click:
+				var fd := _fish_at(mouse_cell)
+				if fd != null:
+					fish_opened.emit(fd)
+					accept_event()
+					return
+			if _collect_near(mouse_cell) == 0 and in_water(mouse_cell):
+				drop_food(mouse_cell - Vector2(0.5, 0.5))
+				sfx.emit("food", 1.0)
 			accept_event()
 		elif event.button_index == MOUSE_BUTTON_RIGHT:
 			var f := _fish_at(mouse_cell)
@@ -592,6 +617,39 @@ func _gui_input(event: InputEvent) -> void:
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_MOUSE_EXIT:
 		mouse_cell = Vector2(-100, -100)
+
+
+func in_water(p: Vector2) -> bool:
+	return p.y > 1.5 and p.y < sand_row() and p.x > 1 and p.x < cols - 1
+
+
+func _coin_near(p: Vector2) -> bool:
+	for c in coins:
+		if (c.pos + Vector2(0.5, 0.5)).distance_to(p) < 1.6:
+			return true
+	return false
+
+
+# Hand over coins (click collects), food pellet over water (click feeds).
+func _update_cursor() -> void:
+	var shape := Control.CURSOR_ARROW
+	if _coin_near(mouse_cell):
+		shape = Control.CURSOR_POINTING_HAND
+	elif in_water(mouse_cell):
+		shape = Control.CURSOR_CROSS
+	if shape != mouse_default_cursor_shape:
+		mouse_default_cursor_shape = shape
+
+
+func collect_all() -> int:
+	var n := coins.size()
+	for i in range(coins.size() - 1, -1, -1):
+		_collect(i)
+	return n
+
+
+func mouse_in_tank() -> bool:
+	return in_water(mouse_cell)
 
 
 func _collect_near(p: Vector2) -> int:

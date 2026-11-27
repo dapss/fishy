@@ -27,17 +27,17 @@ const SPECIES := [
 		"mask": ["aae"],
 	},
 	{
-		"name": "Grinner", "icon": "())=+D", "cost": 75, "value": 5, "interval": 7.0, "speed": 3.5,
+		"name": "Dawa", "icon": "())==D", "cost": 75, "value": 5, "interval": 7.0, "speed": 3.5,
 		"color": Color("ffb347"), "accent": Color("ff6b4a"),
 		"frames": [
-			["())=+D"],
-			["{))=+D"],
+			["())==D"],
+			["{))==D"],
 		],
 		"left": [
-			["C+=(()"],
-			["C+=((}"],
+			["C==(()"],
+			["C==((}"],
 		],
-		"mask": ["a  ae"],
+		"mask": ["a  aa"],
 	},
 	{
 		"name": "Classic", "icon": "><((((o>", "cost": 400, "value": 22, "interval": 8.0, "speed": 3.0,
