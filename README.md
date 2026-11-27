@@ -10,7 +10,7 @@ An ASCII fish tank idle game for Windows that doubles as a desktop widget.
 [![Godot 4.7](https://img.shields.io/badge/Godot-4.7-478cbf?style=flat-square&logo=godotengine&logoColor=white)](https://godotengine.org)
 [![Windows x64](https://img.shields.io/badge/Windows-x64-0078d4?style=flat-square)](#download)
 
-[Download](#download) · [Features](#features) · [How to Play](#how-to-play) · [Desktop Widget](#desktop-widget) · [Controls](#controls) · [Build from Source](#build-from-source)
+[Download](#download) · [Features](#features) · [How to Play](#how-to-play) · [Dirty Tanks](#dirty-tanks) · [Desktop Widget](#desktop-widget) · [Controls](#controls) · [Build from Source](#build-from-source)
 
 </div>
 
@@ -40,7 +40,9 @@ From v0.2.0 on, fishy checks GitHub for a new version a few seconds after launch
 - Individual fish cards for naming and inspecting fish, a fish list overlay (`L`) to jump to any fish, sell undo (`Ctrl+Z`), and lifetime stats.
 - Offline earnings for up to 12 hours while closed, plus optional system tray mode, battery saver (`10` FPS unfocused), and Start with Windows.
 - Automatic saving, rolling backups (last 10 kept), and save export/import built into Settings.
-- One-click updates from GitHub releases (always asks first), plus a per-user installer.
+- Dirty tanks: grime grows on the glass in random algae patches, and you scrub it off by hand in clean mode, with sponge physics (stroke speed, smearing, a sponge that fills up and needs rinsing).
+- Dirty water has consequences: fewer coins, sick fish, lost levels and, if left fully covered, dead fish you can revive with Fish Medicine or flush.
+- One-click updates from GitHub releases (always asks first), a per-user installer, and a "What's new" card after each update.
 
 ## How to Play
 
@@ -49,6 +51,8 @@ Fish swim around the tank and drop `$` coins that sink to the sand. Click a coin
 Over time, fish get hungry and show a `?` above them. Click anywhere in the water to drop food `*`. Eating gives XP and levels a fish up (max level 5), increasing the value of every coin it drops. Starving fish (`!`) stop dropping coins until fed.
 
 Spend coins in the shop on new fish and upgrades. Right-click or double-click any fish to name it, check its stats, or sell it (you have 8 seconds to undo a sale with `Ctrl+Z`).
+
+Keep the glass clean (see [Dirty Tanks](#dirty-tanks)).
 
 Your tank keeps earning while the game is closed, up to 12 hours per session. Without a snail, 15% of offline coins are collected before they disappear; owning at least one snail raises that to 85%.
 
@@ -67,7 +71,7 @@ Your tank keeps earning while the game is closed, up to 12 hours per session. Wi
 </details>
 
 <details>
-<summary>Upgrades (6)</summary>
+<summary>Upgrades (9)</summary>
 
 | Upgrade | Base cost | Max level | Effect |
 |---|---:|---:|---|
@@ -77,8 +81,31 @@ Your tank keeps earning while the game is closed, up to 12 hours per session. Wi
 | Bigger tank | $150 | 8 | Adds room for 2 more fish per level |
 | Seaweed `)(` | $50 | 8 | +5% coin value per plant |
 | Castle `[~]` | $5,000 | 1 | +25% coin value |
+| Algae eater `-=(o` | $400 | 3 | Sticks to the glass and nibbles the dirtiest spots |
+| Filter `[=]` | $250 | 3 | Grime builds up 12% slower per level |
+| UV lamp | $25,000 | 1 | Grime builds up 20% slower |
+
+Filter and UV lamp together slow grime by at most 50%. **Fish Medicine** is a consumable in the same shop, priced at about a third of your best fish.
 
 </details>
+
+## Dirty Tanks
+
+Grime slowly builds up on the glass: it starts at random spots, spreads like algae, and favours the sand, the sides and the waterline. From spotless to fully covered takes about 1.7 hours of play.
+
+| Dirt | What happens |
+|---|---|
+| 0-30% | Up to -10% coins |
+| 30-60% | Down to -30% coins; food that lands in grime is lost, snails skip buried coins |
+| 60-85% | Down to -60% coins; fish get sick (`~`): slow, no XP, half the benefit from food; snails crawl at half speed |
+| 85-100% | Down to -90% coins; sick fish drop a level every 2.5 minutes |
+| Fully covered for 10 min | The weakest sick fish dies, then another every 3 minutes (never your last fish) |
+
+**Cleaning.** Press `W` (or click `[ clean ]`), hold the left button and scrub. Slow, steady strokes clean best; fast ones mostly smear the grime ahead. The sponge fills up as it works and cleans worse: right-click to rinse it, or lift it out of the water for a moment. Old grime gets stubborn and takes more passes. Scrub the tank spotless for +25% coins for 3 minutes.
+
+**Dead fish** float belly-up with a revive countdown (5 minutes, counted only while the game is open). Right-click one to revive it with Fish Medicine (the tank must be below 60%; it comes back one level lower) or flush it for a small refund. Too late and it turns to bones, which can only be flushed. Dead fish left in the tank make grime grow faster. Medicine also cures sick fish.
+
+While the game is closed, grime only grows to 85% and nothing gets sick or dies. Don't want any of this? Turn off **Tank gets dirty** or **Fish can die from dirt** in settings.
 
 ## Desktop Widget
 
@@ -102,7 +129,9 @@ Optional settings for running all day:
 |---|---|
 | Drop food | Left-click water |
 | Collect coins | Click or drag over `$` |
-| Open fish card (name, stats, sell) | Right-click or double-click a fish |
+| Open fish card (name, stats, sell, cure, revive, flush) | Right-click or double-click a fish |
+| Scrub the glass (clean mode) | Hold left and drag |
+| Rinse the sponge (clean mode) | Right-click |
 | Buy as many as you can afford | `Shift` + click any shop button |
 | Move window | Drag top bar, or `Alt` + drag anywhere |
 | Resize borderless window | Drag bottom-right corner grip |
@@ -113,6 +142,7 @@ Optional settings for running all day:
 |---|---|
 | `1` to `6` | Buy fish (hold `Shift` to buy max) |
 | `F` | Feed every hungry fish |
+| `W` | Clean mode on / off |
 | `Space` | Collect all coins |
 | `L` | Open fish list |
 | `S` | Toggle shop pop-up (compact layout) |
@@ -179,11 +209,13 @@ fishy/
 └── scripts/
     ├── main.gd               # Game loop, HUD, shop, window/widget modes, tray, saves & backups
     ├── tank.gd               # Character-grid ASCII simulation and renderer
-    ├── data.gd               # Species sprites, color masks, upgrades, formatting helpers
+    ├── data.gd               # Species sprites, color masks, upgrades, tuning, formatting helpers
+    ├── dirt.gd               # Grime grid: algae growth, sponge wiping, save format
+    ├── changelog.gd          # Release notes for the "What's new" card
     ├── audio.gd              # Procedurally synthesized sound effects
     ├── settings.gd           # Preference defaults and config file persistence
     ├── settings_panel.gd     # Settings overlay UI
-    ├── fish_card.gd          # Fish naming, stats, and sell modal
+    ├── fish_card.gd          # Fish naming, stats, sell / cure / revive / flush modal
     ├── fish_list.gd          # Fish roster overlay
     ├── help_card.gd          # In-game help and shortcut card
     ├── info_card.gd          # Offline earnings and lifetime stats modal
