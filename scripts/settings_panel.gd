@@ -11,6 +11,7 @@ signal stats_requested
 signal export_requested
 signal import_requested
 signal backups_requested
+signal update_check_requested
 
 const LAYOUTS := ["auto", "full", "compact"]
 const LAYOUT_NAMES := ["Auto", "Full", "Compact"]
@@ -33,6 +34,7 @@ var _volume_label: Label
 var _eco: CheckButton
 var _tray: CheckButton
 var _autostart: CheckButton
+var _update_check: CheckButton
 var _reset_button: Button
 var _reset_armed := 0.0
 var _scroll: ScrollContainer
@@ -132,6 +134,19 @@ func _ready() -> void:
 	snap.add_child(_button("right", func(): snap_requested.emit("right")))
 	vb.add_child(snap)
 
+	# Updates: which version this is, and a manual check.
+	var upd := HBoxContainer.new()
+	upd.add_theme_constant_override("separation", 6)
+	var ver := Label.new()
+	ver.text = "Version %s" % ProjectSettings.get_setting("application/config/version", "?")
+	ver.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	upd.add_child(ver)
+	var check_now := _button("Check for update", func(): update_check_requested.emit())
+	check_now.tooltip_text = "Look on GitHub for a newer version now."
+	upd.add_child(check_now)
+	vb.add_child(upd)
+	_update_check = _check(vb, "Check for updates on launch", "Tells you when a new version is out. Nothing is downloaded unless you click Update.", "update_check")
+
 	# Save: backups, moving your save to another PC, starting over.
 	var save_label := Label.new()
 	save_label.text = "Save"
@@ -206,6 +221,7 @@ func sync(values: Dictionary) -> void:
 	_eco.set_pressed_no_signal(values.eco)
 	_tray.set_pressed_no_signal(values.tray)
 	_autostart.set_pressed_no_signal(values.get("autostart", false))
+	_update_check.set_pressed_no_signal(values.get("update_check", true))
 	_reset_armed = 0.0
 	_reset_button.text = "Reset save..."
 

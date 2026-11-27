@@ -11,6 +11,8 @@ const FishCard = preload("res://scripts/fish_card.gd")
 const InfoCard = preload("res://scripts/info_card.gd")
 const HelpCard = preload("res://scripts/help_card.gd")
 const FishList = preload("res://scripts/fish_list.gd")
+const Updater = preload("res://scripts/updater.gd")
+const UpdateCard = preload("res://scripts/update_card.gd")
 const BACKUP_DIR := "user://backups"
 const BACKUP_KEEP := 10
 const BACKUP_EVERY := 900.0        # seconds between automatic backups
@@ -71,6 +73,9 @@ var settings_panel
 var fish_card
 var info_card
 var help_card
+var updater
+var update_card
+var _manual_update_check := false
 var help_button: Button
 var fish_list
 var fish_list_button: Button
@@ -132,6 +137,10 @@ func _ready() -> void:
 		_say("Welcome! Click the water to feed your fish. Esc for settings.")
 	_backup_save("start")
 	_refresh()
+	updater.cleanup()
+	_refresh_autostart_path()
+	if settings.values.update_check and OS.has_feature("template"):
+		get_tree().create_timer(4.0 if not OS.is_debug_build() else 1.0).timeout.connect(func(): _check_for_update(false))
 
 
 func _process(dt: float) -> void:
@@ -218,7 +227,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			_toggle_settings()
 	elif k == KEY_F1 or event.unicode == 63:      # F1 or "?"
 		_toggle_help()
-	elif settings_panel.visible or fish_card.visible or info_card.visible or help_card.visible or fish_list.visible:
+	elif settings_panel.visible or fish_card.visible or info_card.visible or help_card.visible or fish_list.visible or update_card.visible:
 		handled = false
 	elif k == KEY_Z and event.ctrl_pressed:
 		_undo_sell()
@@ -744,7 +753,24 @@ func _build_ui() -> void:
 	settings_panel.export_requested.connect(func(): _open_save_dialog(true))
 	settings_panel.import_requested.connect(func(): _open_save_dialog(false))
 	settings_panel.backups_requested.connect(_open_backups)
+	settings_panel.update_check_requested.connect(func(): _check_for_update(true))
 	add_child(settings_panel)
+
+	updater = Updater.new()
+	updater.update_found.connect(_on_update_found)
+	updater.up_to_date.connect(func(v):
+		if _manual_update_check:
+			_say("You have the latest version (v%s)." % v))
+	updater.check_failed.connect(func(reason):
+		if _manual_update_check:
+			_say("Couldn't check for updates (%s)." % reason))
+	updater.download_progress.connect(func(f): update_card.set_progress(f))
+	updater.download_failed.connect(func(reason): update_card.set_failed(reason))
+	updater.ready_to_restart.connect(_install_update)
+	add_child(updater)
+	update_card = UpdateCard.new()
+	update_card.update_pressed.connect(func(): updater.download())
+	add_child(update_card)
 
 
 func _make_button(text: String, cb: Callable) -> Button:
@@ -822,7 +848,7 @@ func _toggle_fish_list() -> void:
 
 
 func _check_tips() -> void:
-	if tip_box.visible or _tip_cooldown > 0.0 or settings_panel.visible or info_card.visible or help_card.visible or fish_list.visible:
+	if tip_box.visible or _tip_cooldown > 0.0 or settings_panel.visible or info_card.visible or help_card.visible or fish_list.visible or update_card.visible:
 		return
 	for id in TIP_ORDER:
 		if tips_seen.has(id):
@@ -1001,6 +1027,7 @@ func _fit_popups() -> void:
 	var room := maxf(60.0, size.y - top - pad - 16.0)
 	shop_scroll.custom_minimum_size.y = minf(shop_box.get_combined_minimum_size().y, room)
 	info_card.max_width = size.x - 40.0
+	update_card.max_width = size.x - 40.0
 	fish_card.max_width = size.x - 40.0
 
 
@@ -1633,7 +1660,41 @@ func import_save(path: String) -> bool:
 	return true
 
 
+# ---------------------------------------------------------------- updates
+
+func _check_for_update(manual: bool) -> void:
+	_manual_update_check = manual
+	if manual:
+		_say("Checking for updates...")
+	updater.check()
+
+
+func _on_update_found(info: Dictionary) -> void:
+	settings_panel.visible = false
+	update_card.open(info, updater.current_version, updater.can_self_update())
+
+
+# Save everything first, so the new version starts exactly where we are.
+func _install_update() -> void:
+	_save_game()
+	_backup_save("before-update")
+	_store_window()
+	settings.save_file()
+	if not updater.install():
+		update_card.set_failed("couldn't replace the game file")
+		return
+	updater.restart()
+	get_tree().quit()
+
+
 # ---------------------------------------------------------------- start with Windows
+
+# If the game moved (installed somewhere new, or the folder was moved),
+# point Start with Windows at where it is now.
+func _refresh_autostart_path() -> void:
+	if settings.values.autostart and OS.has_feature("template"):
+		_set_autostart(true)
+
 
 # Registered under HKCU\...\Run, so it only affects this Windows user.
 func _autostart_command() -> String:
