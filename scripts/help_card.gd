@@ -10,7 +10,7 @@ const SECTIONS := [
 		"Fish drop $ coins that sink to the sand. Click a coin, or drag across coins, to collect them.",
 		"Fish get hungry over time ( ? above them). Click the water to drop food. Starving fish ( ! ) stop dropping coins.",
 		"Each fish eats only its own food: flakes * (free), pellets \u2022, shrimp c, plankton \u00b0 (buy them in the shop). A click drops what the hungriest fish nearby eats; the food bar (or Q) picks one yourself. The auto-feeder uses your stock.",
-		"The Dawa doesn't eat: when it's lonely ( ... ), move the mouse back and forth over it to pat it. Keep patting a fully happy Dawa and it gets super happy: coins twice as often for a minute (every 5 minutes at most). Algae eaters eat only grime.",
+		"The Dawa doesn't eat: when it's lonely ( ... ), move the mouse back and forth over it to pat it. Keep patting a fully happy Dawa until the hearts above it fill up (about 20 seconds) and it gets super happy: coins twice as often for a minute, then 5 minutes before it can happen again. Algae eaters eat only grime.",
 		"Fed fish gain XP and level up (max 5). Higher levels drop bigger coins.",
 		"Spend coins in the shop on more fish and upgrades. A snail collects coins for you, the auto-feeder feeds for you.",
 		"Sharks don't eat pellets: a hungry shark hunts guppies. Name a guppy to keep it safe.",

@@ -5,6 +5,14 @@ extends RefCounted
 
 const ENTRIES := [
 	{
+		"version": "0.4.3",
+		"notes": [
+			"Happiness overload takes much longer now (about 20 seconds of patting a happy Dawa), with hearts above it that fill up as you go. After a minute of super happy, it rests for 5 minutes.",
+			"And it's a much bigger party: a flash, a ring of light, fireworks, rainbow confetti over the whole tank, and a sparkly rainbow trail while it's super happy.",
+			"Patting reaches a Dawa even when another fish swims in front of it.",
+		],
+	},
+	{
 		"version": "0.4.2",
 		"notes": [
 			"Fixed: patting a fully happy Dawa into a happiness overload now works.",

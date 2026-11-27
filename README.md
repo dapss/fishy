@@ -36,11 +36,12 @@ From v0.2.0 on, fishy checks GitHub for a new version a few seconds after launch
 - Eight fish species to collect, from Guppy (`><'>`) to Jellyfish, each with its own sprite, speed, coin interval, and XP leveling up to level 5. Sharks hunt guppies instead of eating pellets, and algae eaters graze grime off the glass.
 - Desktop widget mode with borderless window, always-on-top pinning, experimental transparent background, size presets, and corner/edge snapping.
 - Compact layout with a pop-up shop and responsive font scaling so the tank stays readable in small windows down to `360x240`.
-- Code-synthesized sound effects (coins, food, splashes, level-ups, purchases, sales) with volume control and one-key mute.
+- Code-synthesized sound effects (coins, food, splashes, level-ups, purchases, sales, pats, chomps, sponge squeaks) with volume control and one-key mute.
 - Individual fish cards for naming and inspecting fish, a fish list overlay (`L`) to jump to any fish, sell undo (`Ctrl+Z`), and lifetime stats.
 - Offline earnings for up to 12 hours while closed, plus optional system tray mode, battery saver (`10` FPS unfocused), and Start with Windows.
 - Automatic saving, rolling backups (last 10 kept), and save export/import built into Settings.
-- Food that matters: every fish eats only its own kind (free flakes, or pellets, shrimp and plankton from the shop), the auto-feeder draws from your stock, and the Dawa wants pats instead of food.
+- Food that matters: every fish eats only its own kind (free flakes, or pellets, shrimp and plankton from the shop), and the auto-feeder draws from your stock.
+- A Dawa that wants pats instead of food: it droops when it's lonely, and if you keep patting a happy one it bursts into a celebration of fireworks and rainbow confetti, then drops coins twice as often for a minute.
 - Dirty tanks: grime grows on the glass in random algae patches, and you scrub it off by hand in clean mode, with sponge physics (stroke speed, smearing, a sponge that fills up and needs rinsing).
 - Dirty water has consequences: fewer coins, sick fish, lost levels and, if left fully covered, dead fish you can revive with Fish Medicine or flush.
 - One-click updates from GitHub releases (always asks first), a per-user installer, and a "What's new" card after each update.
@@ -79,7 +80,7 @@ Each species unlocks once you buy the one before it. The algae eater is always i
 
 **Jellyfish** don't swim: they pulse up in quick squeezes and sink slowly in between, drifting toward food rather than chasing it.
 
-**Algae eaters** swim to the dirtiest parts of the glass and graze the grime off as they go. Grime is the only thing they eat: in a spotless tank they go hungry.
+**Algae eaters** look over the glass for the thickest grime they can reach, then crawl slowly along the patch, scraping it off with their mouth. Mouth first, they reach right into the corners, the side walls and the waterline, and several algae eaters spread out over different patches. Grime is the only thing they eat: in a spotless tank they go hungry (with dirt turned off in settings, they never do).
 
 </details>
 
@@ -97,7 +98,8 @@ Prices grow with your coin multiplier (Minerals, Seaweed, Castle), so food stays
 - A click drops whatever the hungriest fish nearby eats. The food bar next to the info line (or `Q`) picks a food yourself.
 - The auto-feeder drops each hungry fish's own food from your stock, also while the game is closed. When a food runs out, those fish go hungry and stop making coins (they don't die).
 - You can store 100 of each food; the **Food hopper** upgrade raises that to 250, 500 and 1,000.
-- The **Dawa** doesn't eat. When it's lonely (`...`), move the mouse back and forth over it to pat it: pats cheer it up and teach it like meals do. A lonely Dawa droops, its head curving down, and a neglected one sulks (`:(`) and stops making coins. Keep patting a Dawa that's already fully happy and it overloads: a white flash, fireworks, and it's **super happy** for a minute, dropping coins twice as often (once every 5 minutes at most).
+- The **Dawa** doesn't eat. When it's lonely (`...`), move the mouse back and forth over it to pat it: pats cheer it up and teach it like meals do. A lonely Dawa droops, its head curving down, and a neglected one sulks (`:(`) and stops making coins.
+- **Happiness overload.** Keep patting a Dawa that's already fully happy: five hearts above it fill up over about 20 seconds of steady stroking (stop for 3 seconds and they empty). When they're full it bursts: a white flash, a ring of light, a shower of sparks, three fireworks and rainbow confetti over the whole tank. Then it's **super happy** for a minute: rainbow colors, a sparkly trail, little hops and hearts, and coins twice as often. After that it's back to normal, and it can't overload again for 5 minutes.
 - **Algae eaters** eat only grime, **sharks** only guppies.
 - **Treats**, priced at two minutes of your income: Gourmet treat (double XP for 10 minutes) and Golden flakes (coins x1.5 for 5 minutes).
 
@@ -162,6 +164,7 @@ Optional settings for running all day:
 | Drop food | Left-click water |
 | Collect coins | Click or drag over `$` |
 | Open fish card (name, stats, sell, cure, revive, flush) | Right-click or double-click a fish |
+| Pat the Dawa | Move the mouse back and forth over it |
 | Scrub the glass (clean mode) | Hold left and drag |
 | Rinse the sponge (clean mode) | Right-click |
 | Buy as many as you can afford | `Shift` + click any shop button |
@@ -218,10 +221,10 @@ To export a standalone Windows binary (uses the `Windows Desktop` preset in `exp
 godot --headless --export-release "Windows Desktop"
 ```
 
-To build the installer, install [Inno Setup 6](https://jrsoftware.org/isinfo.php) and run (outputs `build/fishy-setup-v0.2.0.exe`):
+To build the installer, install [Inno Setup 6](https://jrsoftware.org/isinfo.php) and run it with the version from `project.godot` (outputs `build/fishy-setup-vX.Y.Z.exe`):
 
 ```powershell
-ISCC.exe /DAppVersion=0.2.0 installer\fishy.iss
+ISCC.exe /DAppVersion=X.Y.Z installer\fishy.iss
 ```
 
 When publishing a release, tag it `vX.Y.Z` (matching `application/config/version` in `project.godot`) and upload the installer, the zip, and the bare `fishy.exe`. The in-game updater downloads the asset named exactly `fishy.exe`.

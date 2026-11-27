@@ -120,7 +120,10 @@ var food_choice := "auto" # what a click drops: "auto" (what nearby fish need) o
 var gourmet_time := 0.0   # treat: double XP
 var golden_time := 0.0    # treat: coins worth more
 var _out_warned := {}     # kind -> time of the last "sold out" warning
-var sparks: Array = []    # fireworks: {pos, vel, life, glyph, color}
+var sparks: Array = []    # fireworks: {pos, vel, life, glyph, color} (+ drag, grav, sway, hue)
+var rockets: Array = []   # super happy fireworks on their way up: {pos, vel, fuse, hue}
+var confetti_time := 0.0  # super happy: confetti rains down over the tank while > 0
+var _confetti_acc := 0.0
 var flashes: Array = []   # {pos (cells), life}
 var _mood_sprites := {}   # species -> mood -> sprite (the droopy Dawa)
 var coins: Array = []     # {pos, value, landed, life}
@@ -350,6 +353,8 @@ func reset() -> void:
 	popups.clear()
 	sparks.clear()
 	flashes.clear()
+	rockets.clear()
+	confetti_time = 0.0
 	snails.clear()
 	hovered = null
 
@@ -576,6 +581,15 @@ func _update_fish(dt: float) -> void:
 		var spd := f.speed * (0.5 if f.sick else 1.0)
 		f.super_time = maxf(0.0, f.super_time - dt)
 		f.super_cd = maxf(0.0, f.super_cd - dt)
+		if f.super_time > 0.0:
+			# A rainbow trail behind it, and hearts now and then.
+			if randf() < dt * 14.0:
+				var tail := f.pos + Vector2(-0.3 if f.facing > 0 else f.w - 0.7, f.h * 0.5)
+				sparks.append({"pos": tail, "vel": Vector2(-1.5 * f.facing, randf_range(-0.4, 0.4)),
+					"life": 0.8, "max": 0.8, "glyph": "~-*."[randi() % 4],
+					"hue": fmod(time * 0.6, 1.0), "rainbow": true, "drag": 0.3, "grav": 0.0})
+			if randf() < dt * 1.5:
+				_popup("\u2665", f.pos + Vector2(f.w * 0.5 + randf_range(-1.5, 1.5), -0.6), Color("ff8fc8"))
 		var mope := mood(f)
 		if mope != "":
 			spd *= 0.45 if mope == "sadder" else 0.65   # mopes around near the bottom
@@ -891,32 +905,63 @@ func pat(f: Fish) -> void:
 			if f.overload >= Data.OVERLOAD_PATS:
 				_super_happy(f)
 				return
-		heart = "<3<3"                          # can't get any happier right now
+			# The heart meter above it shows the charge; just a heart now and then.
+			heart = "<3" if f.overload % 4 == 0 else ""
+		else:
+			heart = "<3<3"                      # can't get any happier right now
 	else:
 		f.overload = 0
-	_popup(heart, f.pos + Vector2(f.w * 0.5, -0.6), Color("ff8fc8"))
+	if heart != "":
+		# Above the heart meter while charging, so it doesn't cover it.
+		_popup(heart, f.pos + Vector2(f.w * 0.5, -1.6 if f.overload > 0 else -0.6), Color("ff8fc8"))
 	sfx.emit("pat", 0.8)
 	if f.pats % Data.PATS_PER_XP == 0:
 		_gain_xp(f)
 
 
 # Happiness overload: a white flash, fireworks, and coins twice as often.
+# The reward for all that patting: a white flash, a ring of light, a burst
+# of sparks, three fireworks going up and popping, and a few seconds of
+# rainbow confetti raining over the whole tank.
 func _super_happy(f: Fish) -> void:
 	f.overload = 0
 	f.super_time = Data.SUPER_TIME
-	f.super_cd = Data.SUPER_COOLDOWN
+	f.super_cd = Data.SUPER_TIME + Data.SUPER_COOLDOWN   # the 5 minutes start once it's back to normal
 	var c := f.pos + Vector2(f.w * 0.5, f.h * 0.5)
-	flashes.append({"pos": c, "life": 0.5})
-	var colors := [Color("ff8fc8"), Color("ffe066"), Color("ffffff"), Color("9ff0d0"), Color("b79ce0")]
+	flashes.append({"pos": c, "life": 0.7, "max": 0.7, "size": 8.0})
+	# A clean ring of light racing outward.
+	for k in 32:
+		var a := TAU * k / 32.0
+		sparks.append({"pos": c, "vel": Vector2(cos(a), sin(a) * 0.5) * 16.0, "life": 0.9, "max": 0.9,
+			"glyph": "o" if k % 2 == 0 else "*", "color": Color("ffffff"), "drag": 0.08, "grav": 0.0})
+	# A messy burst in every color.
+	for k in 40:
+		var a := randf() * TAU
+		var sp := randf_range(4.0, 14.0)
+		sparks.append({"pos": c, "vel": Vector2(cos(a) * sp, sin(a) * sp * 0.55), "life": randf_range(0.8, 1.8),
+			"glyph": "*+.',"[randi() % 5], "hue": randf(), "rainbow": true})
+	# Three fireworks.
+	for k in 3:
+		rockets.append({"pos": c + Vector2(randf_range(-2.0, 2.0), 0.0),
+			"vel": Vector2(randf_range(-7.0, 7.0), randf_range(-11.0, -8.0)),
+			"fuse": 0.45 + 0.3 * k, "hue": randf()})
+	confetti_time = 4.5
+	var p := _popup("SUPER HAPPY!", c + Vector2(0, -1.5), Color("fff3a0"))
+	p.life = 3.0
+	p["rainbow"] = true
+	sfx.emit("sparkle", 1.0)
+	sfx.emit("level", 0.7)
+	_gain_xp(f)
+
+
+func _explode(at: Vector2, hue: float) -> void:
+	flashes.append({"pos": at, "life": 0.35, "max": 0.35, "size": 3.5})
 	for k in 26:
 		var a := randf() * TAU
-		var sp := randf_range(5.0, 13.0)
-		sparks.append({"pos": c, "vel": Vector2(cos(a) * sp, sin(a) * sp * 0.55), "life": randf_range(0.7, 1.4),
-			"glyph": "*+.',"[randi() % 5], "color": colors[randi() % colors.size()]})
-	var p := _popup("SUPER HAPPY!", c + Vector2(0, -1.5), Color("fff3a0"))
-	p.life = 2.2
-	sfx.emit("sparkle", 1.0)
-	_gain_xp(f)
+		var sp := randf_range(3.0, 9.0)
+		sparks.append({"pos": at, "vel": Vector2(cos(a) * sp, sin(a) * sp * 0.55), "life": randf_range(0.7, 1.5),
+			"glyph": "*+.'"[randi() % 4], "hue": fmod(hue + randf_range(-0.07, 0.07) + 1.0, 1.0), "rainbow": true})
+	sfx.emit("coin", 0.45)
 
 
 func _gain_xp(f: Fish) -> void:
@@ -1080,11 +1125,33 @@ func _update_misc(dt: float) -> void:
 	for i in range(sparks.size() - 1, -1, -1):
 		var s: Dictionary = sparks[i]
 		s.life -= dt
-		s.vel *= pow(0.25, dt)                  # air... water resistance
-		s.vel.y += 5.0 * dt                     # then they drift down
+		s.vel *= pow(float(s.get("drag", 0.25)), dt)   # water slows them down
+		s.vel.y += float(s.get("grav", 5.0)) * dt        # then they drift down
 		s.pos += s.vel * dt
-		if s.life <= 0.0:
+		if s.has("sway"):
+			s.pos.x += sin(time * 2.5 + float(s.sway)) * 0.8 * dt
+		if s.life <= 0.0 or s.pos.y > floor_y() + 0.5:
 			sparks.remove_at(i)
+	for i in range(rockets.size() - 1, -1, -1):
+		var r: Dictionary = rockets[i]
+		r.fuse -= dt
+		r.vel.y += 6.0 * dt
+		r.pos += r.vel * dt
+		r.pos.y = maxf(r.pos.y, 1.5)
+		sparks.append({"pos": r.pos, "vel": Vector2.ZERO, "life": 0.35, "max": 0.35, "glyph": ".",
+			"color": Color.from_hsv(r.hue, 0.3, 1.0), "grav": 0.0})
+		if r.fuse <= 0.0:
+			_explode(r.pos, r.hue)
+			rockets.remove_at(i)
+	if confetti_time > 0.0:
+		confetti_time -= dt
+		_confetti_acc += dt * 30.0
+		while _confetti_acc >= 1.0 and sparks.size() < 500:
+			_confetti_acc -= 1.0
+			sparks.append({"pos": Vector2(randf_range(1.5, cols - 2.5), 1.5),
+				"vel": Vector2(randf_range(-0.8, 0.8), randf_range(2.0, 4.0)), "life": randf_range(3.5, 6.0),
+				"glyph": "*'.,`~"[randi() % 6], "hue": randf(), "rainbow": true,
+				"drag": 1.0, "grav": 0.2, "sway": randf() * TAU})
 	for i in range(flashes.size() - 1, -1, -1):
 		flashes[i].life -= dt
 		if flashes[i].life <= 0.0:
@@ -1350,8 +1417,15 @@ func _gui_input(event: InputEvent) -> void:
 
 # Moving the mouse back and forth over a Dawa pats it.
 func _stroke(rel: Vector2) -> void:
-	var f := _fish_at(mouse_cell)
-	if f == null or f.dead or Data.food_of(f.species) != "pat":
+	# The Dawa under the mouse, even if another fish swims in front of it.
+	var f: Fish = null
+	for i in range(fishes.size() - 1, -1, -1):
+		var c: Fish = fishes[i]
+		if not c.dead and Data.food_of(c.species) == "pat" \
+				and Rect2(c.pos - Vector2(0.3, 0.3), Vector2(c.w, c.h) + Vector2(0.6, 0.6)).has_point(mouse_cell):
+			f = c
+			break
+	if f == null:
 		return
 	f.pat_dist += absf(rel.x) / cell.x + absf(rel.y) / cell.y * 0.5
 	if f.pat_dist >= Data.PAT_STROKE:
@@ -1561,15 +1635,23 @@ func _draw_top() -> void:
 # Above the grime.
 func _draw_overlay() -> void:
 	for fl in flashes:
-		var k: float = fl.life / 0.5
+		var k: float = fl.life / float(fl.get("max", 0.5))
 		var c: Vector2 = origin + (fl.pos as Vector2) * cell
-		var r := cell.y * (2.0 + 4.0 * (1.0 - k))
-		_ci.draw_circle(c, r, Color(1, 1, 1, 0.18 * k))
-		_ci.draw_circle(c, r * 0.55, Color(1, 1, 1, 0.45 * k))
+		var size: float = fl.get("size", 4.0)
+		var r := cell.y * (size * 0.35 + size * (1.0 - k))
+		_ci.draw_circle(c, r, Color(1, 1, 1, 0.12 * k))
+		_ci.draw_circle(c, r * 0.6, Color(1, 1, 1, 0.25 * k))
+		_ci.draw_circle(c, r * 0.3, Color(1, 1, 1, 0.5 * k))
 	for s in sparks:
-		var col: Color = s.color
-		col.a = clampf(s.life / 0.5, 0.0, 1.0)
+		var col: Color
+		if s.get("rainbow", false):
+			col = Color.from_hsv(fmod(float(s.hue) + time * 0.4, 1.0), 0.5, 1.0)
+		else:
+			col = s.color
+		col.a = clampf(s.life / minf(0.5, float(s.get("max", 0.5))), 0.0, 1.0)
 		_put(s.pos.x, s.pos.y, s.glyph, col)
+	for r in rockets:
+		_put(r.pos.x, r.pos.y, "^", Color.from_hsv(r.hue, 0.35, 1.0))
 	# Algae eaters cling to the glass, in front of the grime they graze.
 	for f: Fish in fishes:
 		if not f.dead and _is_cleaner(f):
@@ -1587,9 +1669,16 @@ func _draw_overlay() -> void:
 
 	for p in popups:
 		var a: float = clamp(p.life / 0.6, 0.0, 1.0)
-		var col: Color = p.color
-		col.a = a
-		_put(p.pos.x - String(p.text).length() * 0.5, p.pos.y, p.text, col)
+		var text := String(p.text)
+		var x0: float = p.pos.x - text.length() * 0.5
+		if p.get("rainbow", false):
+			for i in text.length():
+				var rc := Color.from_hsv(fmod(i * 0.08 + time * 0.7, 1.0), 0.45, 1.0, a)
+				_put(x0 + i, p.pos.y + sin(time * 8.0 + i * 0.7) * 0.15, text[i], rc)
+		else:
+			var col: Color = p.color
+			col.a = a
+			_put(x0, p.pos.y, text, col)
 
 
 # Grime on the glass: a murky tint that hides what's behind it, with
@@ -1753,6 +1842,17 @@ func _draw_fish(f: Fish) -> void:
 	if f.super_time > 0.0:
 		var hx := clampf(head_x - (2 if f.facing > 0 else 0), 1.0, cols - 4.0)
 		_put(hx, f.pos.y - 1 + bob, "^-^", Color("fff3a0"))
+	elif f.overload > 0 and time - f.last_pat < 3.0:
+		# Charging up: five hearts fill as you keep patting, pulsing faster.
+		var fill := float(f.overload) / Data.OVERLOAD_PATS
+		var mx := clampf(f.pos.x + f.w * 0.5 - 2.5, 1.0, cols - 6.0)
+		var pulse := 0.75 + 0.25 * sin(time * (6.0 + 14.0 * fill))
+		for i in 5:
+			var on := fill * 5.0 > i
+			var hc := Color("ff8fc8") if on else Color("6a5068")
+			if on:
+				hc = hc.lerp(Color("ffffff"), fill * 0.5 * pulse)
+			_put(mx + i, f.pos.y - 1 + bob, "\u2665", hc)
 	elif lonely and f.hunger > 0.7 and not f.sick:
 		# A lonely Dawa sulks: ... then :( when it stops making coins.
 		var mark := ":(" if f.hunger >= 1.0 else "..."

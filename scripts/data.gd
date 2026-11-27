@@ -239,9 +239,9 @@ const PAT_STROKE := 2.5
 const PAT_VALUE := 0.15                   # happiness per pat (a meal is 0.5)
 const PATS_PER_XP := 3
 # Happiness overload: keep patting a fully happy Dawa and it bursts with joy.
-const OVERLOAD_PATS := 6                  # extra pats in a row, when already full
+const OVERLOAD_PATS := 120                # extra pats in a row, when already full (~20 s of stroking)
 const SUPER_TIME := 60.0                  # super happy: coins twice as often
-const SUPER_COOLDOWN := 300.0             # from one burst to the next
+const SUPER_COOLDOWN := 300.0             # after super happy ends, before it can overload again
 # Treats, bought and used at once. Priced from your income.
 const GOURMET_TIME := 600.0               # double XP from food and pats
 const GOLDEN_TIME := 300.0                # coins are worth more
