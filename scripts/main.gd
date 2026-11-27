@@ -47,6 +47,8 @@ var _refresh_t := 0.0
 var _save_t := 0.0
 var _afford_normal: StyleBoxFlat
 var _afford_hover: StyleBoxFlat
+var _floating_labels: Array = []   # labels that need a backing when transparent
+var _label_backing: StyleBoxFlat
 
 
 func _ready() -> void:
@@ -152,6 +154,7 @@ func _buy_fish(i: int) -> void:
 	tank.add_fish(i, 0, 0, 0.3, true)
 	unlocked = max(unlocked, min(i + 1, Data.SPECIES.size() - 1))
 	_say("A new %s %s splashes in!" % [Data.SPECIES[i].name, Data.SPECIES[i].icon])
+	_save_game()
 	_refresh()
 
 
@@ -167,6 +170,7 @@ func _buy_upgrade(key: String) -> void:
 	upgrades[key] = lv + 1
 	_apply_upgrades()
 	_say("Bought %s (level %d)." % [u.name, lv + 1])
+	_save_game()
 	_refresh()
 
 
@@ -178,6 +182,7 @@ func _sell_fish(f) -> void:
 	money += v
 	tank.remove_fish(f)
 	_say("Sold a %s for $%s." % [Data.SPECIES[f.species].name, Data.fmt(v)])
+	_save_game()
 	_refresh()
 
 
@@ -237,6 +242,12 @@ func _build_theme() -> Theme:
 	th.set_color("font_hover_color", "PopupMenu", Color("ffffff"))
 	th.set_color("font_color", "TooltipLabel", Color("bfe6ff"))
 	th.set_stylebox("panel", "TooltipPanel", panel)
+
+	_label_backing = StyleBoxFlat.new()
+	_label_backing.bg_color = Color("0b1322")
+	_label_backing.set_corner_radius_all(3)
+	_label_backing.content_margin_left = 8
+	_label_backing.content_margin_right = 8
 
 	# Buttons you can afford right now glow green.
 	_afford_normal = normal.duplicate() as StyleBoxFlat
@@ -329,6 +340,7 @@ func _build_ui() -> void:
 	info_label = Label.new()
 	info_label.custom_minimum_size.y = 20
 	info_label.clip_text = true
+	_floating_labels.append(info_label)
 	main_vb.add_child(info_label)
 
 	# Shop.
@@ -394,6 +406,8 @@ func _section_label(text: String) -> Label:
 	l.text = "-- " + text + " --"
 	l.add_theme_color_override("font_color", Color("3a6b8a"))
 	l.add_theme_font_size_override("font_size", 13)
+	l.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	_floating_labels.append(l)
 	return l
 
 
@@ -425,10 +439,18 @@ func _apply_settings() -> void:
 	w.min_size = MIN_WINDOW
 	w.borderless = v.borderless
 	w.always_on_top = v.on_top
-	w.transparent = v.transparent
+	# The window itself is always created transparent-capable (project setting
+	# display/window/size/transparent): Windows ignores turning that on later.
+	# So the toggle only decides whether we paint a background.
 	get_viewport().transparent_bg = v.transparent
 	bg.visible = not v.transparent
 	tank.transparent_outside = v.transparent
+	# Text floating over the desktop is unreadable, so give it a dark backing.
+	for l in _floating_labels:
+		if v.transparent:
+			l.add_theme_stylebox_override("normal", _label_backing)
+		else:
+			l.remove_theme_stylebox_override("normal")
 	Engine.max_fps = int(v.fps)
 	pin_button.text = "[ unpin ]" if v.on_top else "[ pin ]"
 	grip.visible = v.borderless
