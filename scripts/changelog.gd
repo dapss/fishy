@@ -5,6 +5,17 @@ extends RefCounted
 
 const ENTRIES := [
 	{
+		"version": "0.4.0",
+		"notes": [
+			"New fish: the Jellyfish, after the Shark. It pulses up and drifts down instead of swimming.",
+			"Algae eaters are fish now (key 8): they graze grime off the glass, and the grime feeds them. Your old ones moved in.",
+			"Sharks don't eat pellets anymore: they hunt guppies. Name a guppy to keep it safe.",
+			"New upgrade: Big sponge. Wider strokes, scrubs harder, needs rinsing less often.",
+			"Dirty tanks no longer slow the game down.",
+			"The sponge outline keeps up with the mouse.",
+		],
+	},
+	{
 		"version": "0.3.0",
 		"notes": [
 			"Dirty tanks! Grime slowly builds up on the glass.",

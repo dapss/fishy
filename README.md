@@ -33,7 +33,7 @@ From v0.2.0 on, fishy checks GitHub for a new version a few seconds after launch
 ## Features
 
 - Character-grid ASCII aquarium with animated swimming, blinking eyes, drifting bubbles, rising floating text, seaweed, snails, and a tiny castle.
-- Six fish species to collect, from Guppy (`><'>`) to Shark, each with its own sprite, speed, coin interval, and XP leveling up to level 5.
+- Eight fish species to collect, from Guppy (`><'>`) to Jellyfish, each with its own sprite, speed, coin interval, and XP leveling up to level 5. Sharks hunt guppies instead of eating pellets, and algae eaters graze grime off the glass.
 - Desktop widget mode with borderless window, always-on-top pinning, experimental transparent background, size presets, and corner/edge snapping.
 - Compact layout with a pop-up shop and responsive font scaling so the tank stays readable in small windows down to `360x240`.
 - Code-synthesized sound effects (coins, food, splashes, level-ups, purchases, sales) with volume control and one-key mute.
@@ -57,7 +57,7 @@ Keep the glass clean (see [Dirty Tanks](#dirty-tanks)).
 Your tank keeps earning while the game is closed, up to 12 hours per session. Without a snail, 15% of offline coins are collected before they disappear; owning at least one snail raises that to 85%.
 
 <details>
-<summary>Fish species (6)</summary>
+<summary>Fish species (8)</summary>
 
 | Species | Sprite | Cost | Base coin | Interval |
 |---|---|---:|---:|---:|
@@ -67,6 +67,16 @@ Your tank keeps earning while the game is closed, up to 12 hours per session. Wi
 | Angel | `><(::o>` | $2,000 | $90 | 9s |
 | Puffer | `><( :: o)` | $10,000 | $400 | 10s |
 | Shark | `` >=|||  o`-. `` | $60,000 | $2,200 | 12s |
+| Jellyfish | `(o.o)` | $350,000 | $10,000 | 14s |
+| Algae eater | `=<(##)o` | $400 | $3 | 8s |
+
+Each species unlocks once you buy the one before it. The algae eater is always in the shop while dirt is on.
+
+**Sharks** don't eat pellets: a hungry shark chases the nearest guppy and eats it, and nearby guppies try to dart away. Named guppies are never eaten. With no guppies, a shark goes hungry and stops dropping coins when starving. The auto-feeder doesn't feed sharks.
+
+**Jellyfish** don't swim: they pulse up in quick squeezes and sink slowly in between, drifting toward food rather than chasing it.
+
+**Algae eaters** swim to the dirtiest parts of the glass and graze the grime off as they go. Grazing on grime also feeds them, so in a dirty tank they rarely need pellets.
 
 </details>
 
@@ -81,7 +91,7 @@ Your tank keeps earning while the game is closed, up to 12 hours per session. Wi
 | Bigger tank | $150 | 8 | Adds room for 2 more fish per level |
 | Seaweed `)(` | $50 | 8 | +5% coin value per plant |
 | Castle `[~]` | $5,000 | 1 | +25% coin value |
-| Algae eater `-=(o` | $400 | 3 | Sticks to the glass and nibbles the dirtiest spots |
+| Big sponge | $150 | 3 | +20% reach, +10% scrubbing strength and +50% grime held per level |
 | Filter `[=]` | $250 | 3 | Grime builds up 12% slower per level |
 | UV lamp | $25,000 | 1 | Grime builds up 20% slower |
 
@@ -140,7 +150,7 @@ Optional settings for running all day:
 
 | Key | Action |
 |---|---|
-| `1` to `6` | Buy fish (hold `Shift` to buy max) |
+| `1` to `8` | Buy fish (hold `Shift` to buy max) |
 | `F` | Feed every hungry fish |
 | `W` | Clean mode on / off |
 | `Space` | Collect all coins |

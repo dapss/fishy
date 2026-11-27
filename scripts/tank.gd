@@ -7,6 +7,7 @@ signal fish_opened(fish)              # right-clicked or double-clicked a fish
 signal sfx(sound: String, gain: float)
 signal fish_died(fish)                # dirty water killed a fish
 signal spotless                       # scrubbed a dirty tank completely clean
+signal fish_eaten(prey, hunter)       # a shark ate a guppy
 
 const Data = preload("res://scripts/data.gd")
 const Dirt = preload("res://scripts/dirt.gd")
@@ -50,10 +51,9 @@ const C_GRIME := Color("4a4128")
 const C_SICK := Color("8fd16b")
 const C_DEAD := Color("6c7480")
 const C_BONE := Color("d8d2c0")
-const C_PLECO := Color("b08a5a")
+const C_CHOMP := Color("ff6b6b")
+const HUNT_AT := 0.5              # sharks hunt once this hungry: about a guppy a minute
 const GRIME := [".", ".,", ":;", ";%", "%&", "#&%", "#@&"]
-const PLECO_RIGHT := "-=(o"
-const PLECO_LEFT := "o)=-"
 # Sponge physics. Speeds are in cells per second.
 const SPONGE_POWER := 0.75        # share of the grime one slow pass takes
 const SPONGE_FAST := 45.0         # strokes faster than this mostly skim
@@ -120,12 +120,25 @@ var clean_mode := false
 var sponge_load := 0.0             # 0 clean .. 1 so full of grime it barely cleans
 var boost_time := 0.0              # spotless bonus
 var full_time := 0.0               # how long the tank has been fully covered
-var plecos: Array = []             # {pos, target, dir}
 var _dirt_t := 0.0
 var _dirt_peak := 0.0              # dirtiest it got since the last spotless clean
 var _scrubbing := false
-var _sponge_shown := -1
-var _sponge_cursors: Array = []
+var sponge_level := 0             # Big sponge upgrade
+var _sponge_shown := Vector4i(-1, -1, -1, -1)
+var _sponge_cursors := {}         # Vector4i(load bucket, cell w, cell h, level) -> ImageTexture
+
+# Grime is drawn on its own layer, which is only redrawn when the grime
+# changes: thousands of cells every frame made dirty tanks slow. Things that
+# must show above the grime go on the top layer, redrawn every frame.
+var _dirt_layer: Control
+var _top_layer: Control
+var _ci: CanvasItem = self          # where _put draws
+var _dirt_sig := []
+var _dirt_wait := 0.0
+var _glyphs := {}                   # grime char -> [texture, uv, offset, size]
+var _glyphs_for := Vector2i(-1, -1)
+var _tint_img: Image
+var _tint_tex: ImageTexture
 
 var hovered: Fish = null
 var mouse_cell := Vector2(-100, -100)
@@ -145,8 +158,20 @@ func _ready() -> void:
 			"pos": Vector2(randf() * cols, randf() * rows),
 			"vel": Vector2(randf_range(-0.3, 0.3), randf_range(-0.15, 0.15)),
 		})
+	_dirt_layer = _make_layer(_draw_dirt_layer)
+	_top_layer = _make_layer(_draw_top)
 	_recalc_grid()
 	resized.connect(_recalc_grid)
+
+
+func _make_layer(painter: Callable) -> Control:
+	var l := Control.new()
+	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	l.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	l.draw.connect(painter)
+	l.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	add_child(l)
+	return l
 
 
 # ---------------------------------------------------------------- grid helpers
@@ -372,14 +397,6 @@ func cure(f: Fish) -> void:
 	_popup("cured!", f.pos + Vector2(f.w * 0.5, -0.6), Color("9dff9d"))
 
 
-func set_plecos(n: int) -> void:
-	while plecos.size() > n:
-		plecos.pop_back()
-	while plecos.size() < n:
-		var p := Vector2(randf_range(2.0, cols - 6.0), randf_range(2.0, sand_row() - 2.0))
-		plecos.append({"pos": p, "target": p, "dir": 1})
-
-
 func set_clean_mode(on: bool) -> void:
 	clean_mode = on
 	_scrubbing = false
@@ -441,25 +458,75 @@ func _process(dt: float) -> void:
 	_update_feeder(dt)
 	_update_misc(dt)
 	_update_dirt(dt)
-	_update_plecos(dt)
 	_update_hover()
 	queue_redraw()
+	_top_layer.queue_redraw()
+	_refresh_dirt_layer(dt)
+
+
+# Redraw the grime only when it changed (or the tank was resized), and not
+# more often than needed: fast while scrubbing, slowly for growth and the
+# algae eaters' nibbling.
+func _refresh_dirt_layer(dt: float) -> void:
+	_dirt_wait -= dt
+	var sig := [dirt.get_instance_id(), dirt.version, dirt_enabled, cols, rows, cell, origin, font_size]
+	if sig == _dirt_sig:
+		return
+	var layout_same: bool = _dirt_sig.size() == sig.size() and sig.slice(2) == _dirt_sig.slice(2) \
+		and sig[0] == _dirt_sig[0]
+	if layout_same and _dirt_wait > 0.0:
+		return
+	_dirt_sig = sig
+	_dirt_wait = 0.05 if _scrubbing else 0.4
+	_dirt_layer.queue_redraw()
 
 
 func _update_fish(dt: float) -> void:
+	# Hungry sharks on the hunt, so their prey can try to get away.
+	var hunters := []
+	for f: Fish in fishes:
+		if not f.dead and is_hunter(f) and f.hunger > HUNT_AT:
+			hunters.append(f)
+	var eaten := []
 	for f: Fish in fishes:
 		var sp: Dictionary = Data.SPECIES[f.species]
-		if f.dead:
-			_update_dead(f, dt)
+		if f.dead or eaten.has(f):
+			if f.dead:
+				_update_dead(f, dt)
 			continue
 		f.hunger = min(1.0, f.hunger + dt / Data.HUNGER_TIME)
 		f.weak = maxf(0.0, f.weak - dt)
 		var spd := f.speed * (0.5 if f.sick else 1.0)
 		var chasing := false
+		var center := f.pos + Vector2(f.w, f.h) * 0.5
+		var hunter := is_hunter(f)
+		var prey: Fish = null
+
+		if hunter:
+			# Sharks ignore pellets and go after the nearest guppy instead.
+			if f.hunger > HUNT_AT:
+				prey = _nearest_prey(f, eaten)
+				if prey != null:
+					f.target = _clamp_fish(f, prey.pos + Vector2(prey.w, prey.h) * 0.5 - Vector2(f.w, f.h) * 0.5)
+					spd *= 1.6
+					chasing = true
+		elif _is_prey(f) and not hunters.is_empty():
+			# Prey darts away from a hunting shark that gets close.
+			for h: Fish in hunters:
+				var away: Vector2 = center - (h.pos + Vector2(h.w, h.h) * 0.5)
+				if away.length() < 9.0:
+					f.target = _clamp_fish(f, f.pos + away.normalized() * 6.0)
+					spd *= 1.5
+					chasing = true
+					break
+		elif _is_cleaner(f) and dirt_enabled:
+			# Grime is food too: grazing on it keeps an algae eater fed.
+			if dirt_at(center) > 0.25:
+				f.hunger = maxf(0.0, f.hunger - dt * 2.0 / Data.HUNGER_TIME)
+			dirt.nibble(_glass_uv(center), Vector2(2.2 / cols, 1.2 / maxf(1.0, sand_row())), (0.25 if f.sick else 0.5) * dt)
 
 		# Hungry fish chase the nearest food.
-		if f.hunger > 0.35 and not foods.is_empty():
-			var center := f.pos + Vector2(f.w, f.h) * 0.5
+		if not chasing and not hunter and f.hunger > 0.35 and not foods.is_empty():
 			var best = null
 			var best_d := INF
 			for fd in foods:
@@ -480,12 +547,14 @@ func _update_fish(dt: float) -> void:
 			f.blink = 0.15
 			f.next_blink = randf_range(2.5, 7.0)
 		if not chasing and (f.pos.distance_to(f.target) < 0.5 or f.wander_timer <= 0.0):
-			f.target = _random_spot(f)
+			f.target = _graze_spot(f) if _is_cleaner(f) else _random_spot(f)
 			f.wander_timer = randf_range(3.0, 9.0)
 
 		var dir := f.target - f.pos
 		var dist := dir.length()
-		if dist > 0.01:
+		if sp.get("drifter", false):
+			_drift(f, dir, spd, dt)
+		elif dist > 0.01:
 			# Fish move mostly sideways; vertical movement is slower.
 			var step: Vector2 = dir / dist * minf(dist, spd * dt)
 			step.y *= 0.6
@@ -496,11 +565,16 @@ func _update_fish(dt: float) -> void:
 
 		# Eat food touching the sprite.
 		var rect := Rect2(f.pos - Vector2(0.6, 0.6), Vector2(f.w, f.h) + Vector2(1.2, 1.2))
-		for i in range(foods.size() - 1, -1, -1):
-			if f.hunger > 0.05 and rect.has_point(foods[i].pos):
-				foods.remove_at(i)
-				_eat(f)
-				break
+		if hunter:
+			if prey != null and rect.has_point(prey.pos + Vector2(prey.w, prey.h) * 0.5):
+				eaten.append(prey)
+				_devour(f, prey)
+		else:
+			for i in range(foods.size() - 1, -1, -1):
+				if f.hunger > 0.05 and rect.has_point(foods[i].pos):
+					foods.remove_at(i)
+					_eat(f)
+					break
 
 		# Drop coins while not starving (and not still weak from being revived).
 		if f.hunger < 1.0 and f.weak <= 0.0:
@@ -511,6 +585,86 @@ func _update_fish(dt: float) -> void:
 					"pos": f.pos + Vector2(f.w * 0.5, f.h * 0.5),
 					"value": fish_value(f), "landed": false, "life": COIN_LIFE, "count": 1,
 				})
+
+
+	for p: Fish in eaten:
+		remove_fish(p)
+
+
+# Jellyfish: a quick squeeze up, then a slow sink, about every two seconds.
+# How hard it squeezes decides whether it rises or sinks overall, so it can
+# still get to where it wants to be. Sideways it just drifts.
+func _drift(f: Fish, dir: Vector2, spd: float, dt: float) -> void:
+	var cycle := fmod(time * 0.5 + f.phase, 1.0)
+	var squeeze := cycle < 0.22
+	var vy: float
+	if dir.y < -0.3:
+		vy = -6.0 if squeeze else 0.6        # wants to go up: strong pulses
+	elif dir.y > 0.3:
+		vy = -1.0 if squeeze else 1.4        # wants to go down: weak ones
+	else:
+		vy = -2.6 if squeeze else 0.75       # about right: bob in place
+	var vx := clampf(dir.x, -1.0, 1.0) * 1.2
+	f.pos = _clamp_fish(f, f.pos + Vector2(vx, vy) * spd * dt)
+	f.anim = 0.0 if squeeze else 1.0          # tentacles tuck in on the squeeze
+	if abs(dir.x) > 0.3:
+		f.facing = 1 if dir.x > 0 else -1
+
+
+static func is_hunter(f) -> bool:
+	return Data.SPECIES[f.species].has("prey")
+
+
+func _is_prey(f: Fish) -> bool:
+	for h: Fish in fishes:
+		if not h.dead and is_hunter(h) and int(Data.SPECIES[h.species].prey) == f.species:
+			return true
+	return false
+
+
+static func _is_cleaner(f) -> bool:
+	return Data.SPECIES[f.species].get("cleaner", false)
+
+
+# The closest guppy a shark may eat. Named guppies are pets: they're safe.
+func _nearest_prey(h: Fish, skip: Array) -> Fish:
+	var kind := int(Data.SPECIES[h.species].prey)
+	var c := h.pos + Vector2(h.w, h.h) * 0.5
+	var best: Fish = null
+	var best_d := INF
+	for f: Fish in fishes:
+		if f.species != kind or f.dead or f.nickname != "" or skip.has(f):
+			continue
+		var d := c.distance_squared_to(f.pos + Vector2(f.w, f.h) * 0.5)
+		if d < best_d:
+			best_d = d
+			best = f
+	return best
+
+
+func _devour(h: Fish, prey: Fish) -> void:
+	_eat(h)
+	_eat(h)            # a whole guppy is worth two pellets
+	_popup("chomp!", prey.pos + Vector2(prey.w * 0.5, -0.5), C_CHOMP)
+	sfx.emit("chomp", 1.0)
+	for k in 3:
+		bubbles.append({"pos": prey.pos + Vector2(randf() * prey.w, 0), "speed": randf_range(2.0, 3.5), "seed": randf() * TAU})
+	fish_eaten.emit(prey, h)
+
+
+# Algae eaters head for the dirtiest of a few random spots on the glass.
+func _graze_spot(f: Fish) -> Vector2:
+	if not dirt_enabled or dirt.level < 0.01:
+		return _random_spot(f)
+	var best := _random_spot(f)
+	var best_d := -1.0
+	for k in 6:
+		var p := _random_spot(f)
+		var dd := dirt_at(p + Vector2(f.w, f.h) * 0.5)
+		if dd > best_d:
+			best_d = dd
+			best = p
+	return best
 
 
 # Dead fish float up to the surface and bob there. The revive window only
@@ -666,7 +820,7 @@ func _update_feeder(dt: float) -> void:
 		return
 	var anyone_hungry := false
 	for f in fishes:
-		if f.hunger > 0.4 and not f.dead:
+		if f.hunger > 0.4 and not f.dead and not is_hunter(f):
 			anyone_hungry = true
 			break
 	if anyone_hungry:
@@ -774,29 +928,6 @@ func _update_dirt(dt: float) -> void:
 		full_time = 0.0
 
 
-func _update_plecos(dt: float) -> void:
-	for p in plecos:
-		var to: Vector2 = p.target - p.pos
-		if to.length() < 0.3:
-			# Head for the dirtiest of a few random spots.
-			var best: Vector2 = p.pos
-			var best_d := -1.0
-			for k in 5:
-				var c := Vector2(randf_range(2.0, cols - 6.0), randf_range(2.0, sand_row() - 2.0))
-				var dd := dirt_at(c)
-				if dd > best_d:
-					best_d = dd
-					best = c
-			p.target = best
-		else:
-			var step := to.normalized() * minf(to.length(), 2.2 * dt)
-			p.pos += step
-			if abs(to.x) > 0.2:
-				p.dir = 1 if to.x > 0.0 else -1
-		if dirt_enabled:
-			dirt.nibble(_glass_uv(p.pos + Vector2(2, 0.5)), Vector2(2.2 / cols, 1.2 / maxf(1.0, sand_row())), 0.5 * dt)
-
-
 # One stroke of the sponge from a to b (cells). Slow, steady strokes clean
 # best; flicks skim; a grimy sponge cleans worse and smears more.
 func _scrub(a: Vector2, b: Vector2, velocity_px: Vector2) -> void:
@@ -804,11 +935,12 @@ func _scrub(a: Vector2, b: Vector2, velocity_px: Vector2) -> void:
 		return
 	var speed := (velocity_px / cell).length()
 	var speed_eff := clampf(1.25 - speed / SPONGE_FAST, 0.2, 1.0)
-	var power := SPONGE_POWER * speed_eff * (1.0 - 0.8 * sponge_load)
+	var power := SPONGE_POWER * (1.0 + Data.SPONGE_POWER_PER_LV * sponge_level) * speed_eff * (1.0 - 0.8 * sponge_load)
 	var smear := clampf(0.04 + 0.45 * (1.0 - speed_eff) + 0.3 * sponge_load, 0.0, 0.8)
-	var r := Vector2(SPONGE_RADIUS.x / maxf(1.0, cols - 2.0), SPONGE_RADIUS.y / maxf(1.0, sand_row() - 1.0))
+	var reach := sponge_radius()
+	var r := Vector2(reach.x / maxf(1.0, cols - 2.0), reach.y / maxf(1.0, sand_row() - 1.0))
 	var got := dirt.wipe(_glass_uv(a), _glass_uv(b), r, power, smear)
-	sponge_load = minf(1.0, sponge_load + got * SPONGE_LOAD_PER_DIRT)
+	sponge_load = minf(1.0, sponge_load + got * SPONGE_LOAD_PER_DIRT / (1.0 + Data.SPONGE_HOLD_PER_LV * sponge_level))
 	if got > 0.05:
 		sfx.emit("squeak", clampf(got * 0.4, 0.15, 0.5))
 		if randf() < 0.3:
@@ -829,32 +961,63 @@ func rinse() -> void:
 		_popup("rinsed", mouse_cell + Vector2(0, -1.0), C_SURFACE)
 
 
-# The sponge cursor gets browner as it fills with grime.
+# The sponge cursor gets browner as it fills with grime. Its reach (the
+# area one stroke covers) is drawn into the cursor image itself: the OS moves
+# the cursor at full speed, while anything the game draws only moves at the
+# game's frame rate and trails behind the pointer.
 func _update_sponge_cursor() -> void:
 	var bucket := int(sponge_load * 4.0 + 0.5)
-	if bucket == _sponge_shown:
+	var key := Vector4i(bucket, int(cell.x), int(cell.y), sponge_level)
+	if key == _sponge_shown:
 		return
-	_sponge_shown = bucket
-	if _sponge_cursors.is_empty():
-		for k in 5:
-			_sponge_cursors.append(_make_sponge(float(k) / 4.0))
-	Input.set_custom_mouse_cursor(_sponge_cursors[bucket], Input.CURSOR_CAN_DROP, Vector2(11, 8))
+	_sponge_shown = key
+	if not _sponge_cursors.has(key):
+		if _sponge_cursors.size() > 20:
+			_sponge_cursors.clear()      # window resized many times
+		_sponge_cursors[key] = _make_sponge(float(bucket) / 4.0, cell, sponge_radius())
+	var tex: ImageTexture = _sponge_cursors[key]
+	Input.set_custom_mouse_cursor(tex, Input.CURSOR_CAN_DROP, (tex.get_size() / 2.0).floor())
 
 
-static func _make_sponge(load_: float) -> ImageTexture:
-	var img := Image.create(22, 16, false, Image.FORMAT_RGBA8)
+# Half the size of what one stroke covers, in cells.
+func sponge_radius() -> Vector2:
+	return SPONGE_RADIUS * (1.0 + Data.SPONGE_REACH_PER_LV * sponge_level)
+
+
+static func _make_sponge(load_: float, cell_px: Vector2, radius: Vector2) -> ImageTexture:
+	# Cursors can be at most 256 x 256 px.
+	var reach := (radius * 2.0 * cell_px).round()
+	var w := clampi(int(reach.x) + 1, 23, 255)
+	var h := clampi(int(reach.y) + 1, 17, 255)
+	w += 1 - w % 2      # odd sizes keep the hotspot dead centre
+	h += 1 - h % 2
+	var img := Image.create(w, h, false, Image.FORMAT_RGBA8)
+	var hx := int(w / 2.0)
+	var hy := int(h / 2.0)
+	# Reach outline.
+	var rx := mini(int(reach.x / 2.0), hx)
+	var ry := mini(int(reach.y / 2.0), hy)
+	var line := Color(1, 0.9, 0.5, 0.3)
+	for x in range(hx - rx, hx + rx + 1):
+		img.set_pixel(x, hy - ry, line)
+		img.set_pixel(x, hy + ry, line)
+	for y in range(hy - ry, hy + ry + 1):
+		img.set_pixel(hx - rx, y, line)
+		img.set_pixel(hx + rx, y, line)
+	# The sponge, centred on the hotspot.
 	var body := Color("f2d25c").lerp(Color("6b5a2a"), load_)
+	var ox := hx - 11
+	var oy := hy - 8
 	for y in 16:
 		for x in 22:
-			var edge := x == 0 or x == 21 or y == 0 or y == 15
-			if edge:
-				img.set_pixel(x, y, Color("1a140a"))
+			var c := body
+			if x == 0 or x == 21 or y == 0 or y == 15:
+				c = Color("1a140a")
 			elif (x * 7 + y * 13) % 11 == 0:
-				img.set_pixel(x, y, body.darkened(0.35))     # sponge holes
+				c = body.darkened(0.35)     # sponge holes
 			elif y < 4:
-				img.set_pixel(x, y, Color("3fae6a").lerp(Color("2a4a2a"), load_))   # scrub side
-			else:
-				img.set_pixel(x, y, body)
+				c = Color("3fae6a").lerp(Color("2a4a2a"), load_)   # scrub side
+			img.set_pixel(ox + x, oy + y, c)
 	return ImageTexture.create_from_image(img)
 
 
@@ -1007,7 +1170,7 @@ func _put(x: float, y: float, text: String, color: Color) -> void:
 	for i in text.length():
 		var ch := text[i]
 		if ch != " ":
-			draw_char(font, base + Vector2(i * cell.x, 0).round(), ch, font_size, color)
+			_ci.draw_char(font, base + Vector2(i * cell.x, 0).round(), ch, font_size, color)
 
 
 func _water_color(y: float) -> Color:
@@ -1106,13 +1269,33 @@ func _draw() -> void:
 	var order := fishes.duplicate()
 	order.sort_custom(func(a, b): return a.w * a.h > b.w * b.h)
 	for f: Fish in order:
-		_draw_fish(f)
+		if f.dead or not _is_cleaner(f):
+			_draw_fish(f)
 
-	if dirt_enabled and dirt.level > 0.0005:
-		_draw_dirt()
 
-	for p in plecos:
-		_put(p.pos.x, p.pos.y, PLECO_RIGHT if p.dir > 0 else PLECO_LEFT, C_PLECO)
+
+func _draw_dirt_layer() -> void:
+	if font == null or not dirt_enabled or dirt.level <= 0.0005:
+		return
+	_ci = _dirt_layer
+	_draw_dirt()
+	_ci = self
+
+
+func _draw_top() -> void:
+	if font == null:
+		return
+	_ci = _top_layer
+	_draw_overlay()
+	_ci = self
+
+
+# Above the grime.
+func _draw_overlay() -> void:
+	# Algae eaters cling to the glass, in front of the grime they graze.
+	for f: Fish in fishes:
+		if not f.dead and _is_cleaner(f):
+			_draw_fish(f)
 
 	# Revive countdowns stay readable through the grime.
 	for f: Fish in fishes:
@@ -1121,13 +1304,8 @@ func _draw() -> void:
 			var label := "x_x %d:%02d" % [left / 60, left % 60]
 			var lx := clampf(f.pos.x, 1.0, cols - 1.0 - label.length())
 			var ly := maxf(1.0, f.pos.y - 1.0 + sin(time * 1.2 + f.phase) * 0.15)
-			draw_rect(Rect2(origin + Vector2(lx, ly) * cell, Vector2(label.length(), 1) * cell), Color(0.03, 0.05, 0.08, 0.7))
+			_ci.draw_rect(Rect2(origin + Vector2(lx, ly) * cell, Vector2(label.length(), 1) * cell), Color(0.03, 0.05, 0.08, 0.7))
 			_put(lx, ly, label, Color("ff8a8a"))
-
-	if clean_mode and _on_glass(mouse_cell):
-		# Show the sponge's reach so you can see what a stroke will cover.
-		var c := origin + (mouse_cell - SPONGE_RADIUS) * cell
-		draw_rect(Rect2(c, SPONGE_RADIUS * 2.0 * cell), Color(1, 0.9, 0.5, 0.18), false, 1.0)
 
 	for p in popups:
 		var a: float = clamp(p.life / 0.6, 0.0, 1.0)
@@ -1140,6 +1318,17 @@ func _draw() -> void:
 # denser characters where it's thicker.
 func _draw_dirt() -> void:
 	var water_rows := sand_row() - 1
+	var rid := _ci.get_canvas_item()
+	_cache_glyphs()
+	# The tint is one small image, a pixel per cell, stretched over the glass
+	# (one quad for the GPU instead of thousands of rectangles). The glyphs
+	# come after it, all from the same font texture, so they batch too.
+	var iw := cols - 2
+	if _tint_img == null or _tint_img.get_width() != iw or _tint_img.get_height() != water_rows:
+		_tint_img = Image.create(iw, water_rows, false, Image.FORMAT_RGBA8)
+		_tint_tex = null
+	_tint_img.fill(Color(0, 0, 0, 0))
+	var marks := []
 	for y in range(1, sand_row()):
 		for x in range(1, cols - 1):
 			var v := dirt.sample((x - 0.5) / float(cols - 2), (y - 0.5) / float(water_rows))
@@ -1148,19 +1337,64 @@ func _draw_dirt() -> void:
 			var col := C_ALGAE.lerp(C_GRIME, clampf(v * 1.2 - 0.2, 0.0, 1.0))
 			var tint := col
 			tint.a = clampf(pow(v, 1.6) * 0.9, 0.0, 0.88)
-			# Whole pixels, edge to edge: no seams or overlaps between cells.
-			var p0 := (origin + Vector2(x, y) * cell).floor()
-			var p1 := (origin + Vector2(x + 1, y + 1) * cell).floor()
-			draw_rect(Rect2(p0, p1 - p0), tint)
+			_tint_img.set_pixel(x - 1, y - 1, tint)
 			# Irregular ASCII grime, thicker characters where it's thicker.
 			# Light film is just a tint; characters only where grime is visible.
-			if v < 0.22:
-				continue
-			var tier: String = GRIME[mini(int(v * GRIME.size()), GRIME.size() - 1)]
-			var ch := tier[absi((x * 73856093) ^ (y * 19349663)) % tier.length()]
-			var gc := col.lightened(0.12)
-			gc.a = clampf(0.22 + v * 0.45, 0.0, 0.7)
+			if v >= 0.22:
+				marks.append(Vector3(x, y, v))
+	if _tint_tex == null:
+		_tint_tex = ImageTexture.create_from_image(_tint_img)
+	else:
+		_tint_tex.update(_tint_img)
+	var p0 := (origin + cell).floor()
+	var p1 := (origin + Vector2(cols - 1, sand_row()) * cell).floor()
+	_ci.draw_texture_rect(_tint_tex, Rect2(p0, p1 - p0), false)
+	for m: Vector3 in marks:
+		var x := int(m.x)
+		var y := int(m.y)
+		var v := m.z
+		var col := C_ALGAE.lerp(C_GRIME, clampf(v * 1.2 - 0.2, 0.0, 1.0))
+		var tier: String = GRIME[mini(int(v * GRIME.size()), GRIME.size() - 1)]
+		var ch := tier[absi((x * 73856093) ^ (y * 19349663)) % tier.length()]
+		var gc := col.lightened(0.12)
+		gc.a = clampf(0.22 + v * 0.45, 0.0, 0.7)
+		var g: Array = _glyphs.get(ch, [])
+		if g.is_empty():
 			_put(x, y, ch, gc)
+		else:
+			# Straight from the font's glyph texture: far cheaper than draw_char.
+			var at := (origin + Vector2(x * cell.x, y * cell.y + ascent)).round() + (g[2] as Vector2)
+			RenderingServer.canvas_item_add_texture_rect_region(rid, Rect2(at, g[3]), g[0], g[1], gc)
+
+
+# Where each grime character sits in the font's glyph textures.
+func _cache_glyphs() -> void:
+	var key := Vector2i(font.get_instance_id(), font_size)
+	if key == _glyphs_for:
+		return
+	_glyphs_for = key
+	_glyphs.clear()
+	var ts := TextServerManager.get_primary_interface()
+	var sz := Vector2i(font_size, 0)
+	var rids := font.get_rids()
+	if rids.is_empty():
+		return
+	var fr: RID = rids[0]
+	for tier in GRIME:
+		for ch in tier:
+			if ch == " " or _glyphs.has(ch):
+				continue
+			var gi := ts.font_get_glyph_index(fr, font_size, ch.unicode_at(0), 0)
+			if gi == 0:
+				continue
+			ts.font_render_glyph(fr, sz, gi)
+			if ts.font_get_glyph_texture_idx(fr, sz, gi) < 0:
+				continue
+			var tex := ts.font_get_glyph_texture_rid(fr, sz, gi)
+			if not tex.is_valid():
+				continue
+			_glyphs[ch] = [tex, ts.font_get_glyph_uv_rect(fr, sz, gi),
+				ts.font_get_glyph_offset(fr, sz, gi), ts.font_get_glyph_size(fr, sz, gi)]
 
 
 func _draw_fish(f: Fish) -> void:
@@ -1203,7 +1437,7 @@ func _draw_fish(f: Fish) -> void:
 			Vector2(f.w * cell.x, f.h * cell.y) + pad * 2.0)
 		var oc: Color = body
 		oc.a = 0.45
-		draw_rect(r, oc, false, 1.0)
+		_ci.draw_rect(r, oc, false, 1.0)
 
 	for k in spr.size():
 		var row: String = spr[k]
@@ -1213,7 +1447,7 @@ func _draw_fish(f: Fish) -> void:
 		var first := row.length() - row.lstrip(" ").length()
 		var last := row.rstrip(" ").length()
 		if last > first:
-			draw_rect(Rect2(origin + Vector2((f.pos.x + first) * cell.x, y * cell.y),
+			_ci.draw_rect(Rect2(origin + Vector2((f.pos.x + first) * cell.x, y * cell.y),
 				Vector2((last - first) * cell.x, cell.y)), _water_color(y))
 		var base := origin + Vector2(f.pos.x * cell.x, y * cell.y + ascent)
 		for i in row.length():
@@ -1223,7 +1457,7 @@ func _draw_fish(f: Fish) -> void:
 			var m := mrow[i]
 			if m == "e" and blinking:
 				ch = "-"
-			draw_char(font, base + Vector2(i * cell.x, 0).round(), ch, font_size, palette.get(m, palette[" "]))
+			_ci.draw_char(font, base + Vector2(i * cell.x, 0).round(), ch, font_size, palette.get(m, palette[" "]))
 
 	# Hunger / starving marker above the head.
 	var head_x := f.pos.x + (f.w - 1 if f.facing > 0 else 0)
@@ -1242,7 +1476,7 @@ func _draw_dead(f: Fish, spr: Array, mask: Array) -> void:
 	var bob := sin(time * 1.2 + f.phase) * 0.15
 	if f == hovered:
 		var pad := Vector2(cell.x * 0.6, cell.y * 0.35)
-		draw_rect(Rect2(origin + Vector2(f.pos.x * cell.x, (f.pos.y + bob) * cell.y) - pad,
+		_ci.draw_rect(Rect2(origin + Vector2(f.pos.x * cell.x, (f.pos.y + bob) * cell.y) - pad,
 			Vector2(f.w * cell.x, f.h * cell.y) + pad * 2.0), Color(C_DEAD, 0.5), false, 1.0)
 	if f.skeleton:
 		var bones := ">" + "-}".repeat(maxi(1, (f.w - 3) / 2)) + "x>"
@@ -1263,5 +1497,5 @@ func _draw_dead(f: Fish, spr: Array, mask: Array) -> void:
 				continue
 			if mrow[i] == "e":
 				ch = "x"
-			draw_char(font, base + Vector2(i * cell.x, 0).round(), ch, font_size,
+			_ci.draw_char(font, base + Vector2(i * cell.x, 0).round(), ch, font_size,
 				C_DEAD.lightened(0.15) if f == hovered else C_DEAD)

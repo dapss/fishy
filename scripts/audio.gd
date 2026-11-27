@@ -54,6 +54,8 @@ func _ready() -> void:
 		_sweep(1976.0, 1976.0, 0.06, 0.25, 4.0, 0.1),
 		_sweep(2637.0, 2637.0, 0.3, 0.25, 6.0, 0.1),
 	]))
+	# Chomp: a quick crunchy snap.
+	_streams["chomp"] = _wav(_mix(_noise(0.12, 0.45, 9.0, 0.3), _sweep(240.0, 90.0, 0.12, 0.35, 8.0, 0.1)))
 	# Warning: two low beeps.
 	_streams["warn"] = _wav(_concat([
 		_sweep(330.0, 330.0, 0.12, 0.3, 2.0, 0.5),

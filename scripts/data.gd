@@ -126,7 +126,9 @@ const SPECIES := [
 		],
 	},
 	{
+		# Sharks don't eat pellets: a hungry shark hunts guppies (not named ones).
 		"name": "Shark", "icon": ">=|||  o`-.", "cost": 60000, "value": 2200, "interval": 12.0, "speed": 4.5,
+		"prey": 0,
 		"color": Color("8fa3b8"), "accent": Color("5f7389"),
 		"frames": [
 			[
@@ -149,7 +151,61 @@ const SPECIES := [
 			"a llllllllllllllllll",
 		],
 	},
+	# Not part of the unlock chain: in the shop whenever dirt is on.
+	# Grazes grime off the glass wherever it goes, and the grime feeds it.
+	{
+		"name": "Algae eater", "icon": "=<(##)o", "cost": 400, "value": 3, "interval": 8.0, "speed": 2.0,
+		"color": Color("b08a5a"), "accent": Color("6b5a2a"),
+		"cleaner": true,
+		"frames": [
+			[
+				"   _/\\_    ",
+				"=<(####)o ",
+			],
+			[
+				"   _/\\_    ",
+				"-<(####)o ",
+			],
+		],
+		"mask": [
+			"   aaaa",
+			"aa dddd e",
+		],
+	},
+	# Doesn't swim, it pulses: a quick squeeze up, then a slow sink.
+	# It drifts toward food instead of chasing it.
+	{
+		"name": "Jellyfish", "icon": "(o.o)", "cost": 350000, "value": 10000, "interval": 14.0, "speed": 1.0,
+		"color": Color("e7a6ff"), "accent": Color("b07ad9"),
+		"drifter": true,
+		"frames": [
+			[
+				" .-. ",
+				"(o.o)",
+				" )|( ",
+			],
+			[
+				" .-. ",
+				"(o.o)",
+				" (|) ",
+			],
+		],
+		"mask": [
+			" ddd",
+			"le el",
+			" aaa",
+		],
+	},
 ]
+
+# Species indexes are saved, so new species go at the end of the list.
+const ALGAE_EATER := 6
+const JELLYFISH := 7
+# The order species unlock in: each one shows up once you buy the one before.
+# The algae eater isn't in it (it's in the shop whenever dirt is on).
+const CHAIN := [0, 1, 2, 3, 4, 5, 7]
+# The order of the fish buttons in the shop (and keys 1-8).
+const SHOP_ORDER := [0, 1, 2, 3, 4, 5, 7, 6]
 
 # key -> data. Cost = base * growth ^ current_level.
 const UPGRADES := {
@@ -177,9 +233,9 @@ const UPGRADES := {
 		"short": "Castle", "name": "Castle [~]", "base": 5000, "growth": 1.0, "max": 1,
 		"desc": "A tiny castle. +25% coin value.",
 	},
-	"pleco": {
-		"short": "Pleco", "name": "Algae eater -=(o", "base": 400, "growth": 3.0, "max": 3,
-		"desc": "Sticks to the glass and nibbles grime wherever it goes.",
+	"sponge": {
+		"short": "Sponge", "name": "Big sponge", "base": 150, "growth": 4.0, "max": 3,
+		"desc": "A bigger, tougher sponge: wider strokes, scrubs harder, holds more grime before it needs a rinse.",
 	},
 	"filter": {
 		"short": "Filter", "name": "Filter [=]", "base": 250, "growth": 2.5, "max": 3,
@@ -190,6 +246,11 @@ const UPGRADES := {
 		"desc": "The tank gets dirty 20% slower.",
 	},
 }
+
+# Big sponge, per level: reach, scrubbing strength, how much grime it holds.
+const SPONGE_REACH_PER_LV := 0.2
+const SPONGE_POWER_PER_LV := 0.1
+const SPONGE_HOLD_PER_LV := 0.5
 
 const FEEDER_INTERVAL := [0.0, 30.0, 22.0, 15.0, 10.0, 6.0]
 

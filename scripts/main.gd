@@ -36,12 +36,12 @@ const DRAG_FPS := 60
 const SNAP_PX := 24
 const UNDO_SECONDS := 8.0
 # First-time tips, checked in this order; each is shown once per save.
-const TIP_ORDER := ["coin", "food", "buy", "snail", "name", "settings", "dirt"]
+const TIP_ORDER := ["coin", "food", "buy", "snail", "name", "settings", "dirt", "shark"]
 const MAX_MEDICINE := 99
 
 var money := Data.START_MONEY
 var lifetime := 0.0
-var unlocked := 1                 # highest species index shown in the shop
+var unlocked := 1                 # how far along Data.CHAIN the shop shows
 var upgrades := {}
 var tips_seen := {}
 var stats := {}
@@ -248,8 +248,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		_undo_sell()
 	elif k == KEY_S and compact:
 		_toggle_shop()
-	elif k >= KEY_1 and k <= KEY_6:
-		_buy_fish(k - KEY_1)
+	elif k >= KEY_1 and k <= KEY_8:
+		_buy_fish(Data.SHOP_ORDER[k - KEY_1])
 	elif k == KEY_F:
 		_feed_key()
 	elif k == KEY_W:
@@ -277,7 +277,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 func _feed_key() -> void:
 	var fed := 0
 	for f in tank.fishes:
-		if f.hunger > 0.35 and fed < 12 and not f.dead:
+		if f.hunger > 0.35 and fed < 12 and not f.dead and not tank.is_hunter(f):
 			tank.drop_food(Vector2(f.pos.x + f.w * 0.5, maxf(2.0, f.pos.y - 1.0)))
 			fed += 1
 	if fed == 0:
@@ -339,13 +339,17 @@ func _apply_upgrades() -> void:
 	tank.has_castle = upgrades.castle > 0
 	tank.set_snails(upgrades.snail)
 	tank.set_weeds(2 + upgrades.weed)
-	tank.set_plecos(upgrades.pleco)
 	tank.dirt_rate_mult = 1.0 - Data.dirt_slowdown(upgrades)
+	tank.sponge_level = upgrades.sponge
 
 
 # Hold Shift to buy as many as you can afford (and have room for).
 func _buy_fish(i: int) -> void:
-	if i < 0 or i >= Data.SPECIES.size() or i > unlocked:
+	if i < 0 or i >= Data.SPECIES.size():
+		return
+	var pos := Data.CHAIN.find(i)
+	var chain := pos >= 0
+	if (chain and pos > unlocked) or (not chain and not settings.values.dirt):
 		return
 	var many := Input.is_key_pressed(KEY_SHIFT)
 	var n := 0
@@ -364,7 +368,8 @@ func _buy_fish(i: int) -> void:
 			break
 	if n == 0:
 		return
-	unlocked = max(unlocked, min(i + 1, Data.SPECIES.size() - 1))
+	if chain:
+		unlocked = max(unlocked, min(pos + 1, Data.CHAIN.size() - 1))
 	stats.fish_bought += n
 	audio.play("buy")
 	var sp: Dictionary = Data.SPECIES[i]
@@ -444,10 +449,10 @@ func _flush_fish(f) -> void:
 
 # About a third of the price of the best fish you keep, so it always stings.
 func medicine_cost() -> float:
-	var best := 0
+	var best := 0.0
 	for f in tank.fishes:
-		best = maxi(best, f.species)
-	return maxf(25.0, floor(float(Data.SPECIES[best].cost) / 3.0))
+		best = maxf(best, float(Data.SPECIES[f.species].cost))
+	return maxf(25.0, floor(best / 3.0))
 
 
 func _buy_medicine() -> void:
@@ -507,6 +512,25 @@ func _on_fish_died(f) -> void:
 	_say("%s died from the dirty water! Right-click it: revive within %d min, or flush it." % [
 		fish_title(f), int(Data.REVIVE_WINDOW / 60.0)])
 	_save_game()
+
+
+func _on_fish_eaten(prey, hunter) -> void:
+	stats.fish_eaten = int(stats.get("fish_eaten", 0)) + 1
+	_say("%s ate a %s! (Name a guppy to keep it safe.)" % [fish_title(hunter), Data.SPECIES[prey.species].name])
+	_save_game()
+	_refresh()
+
+
+# One line about what makes a species different, or "".
+func _species_note(i: int, prefix := "") -> String:
+	var sp: Dictionary = Data.SPECIES[i]
+	if sp.has("prey"):
+		return prefix + "Eats %ss, not pellets. Named ones are safe." % Data.SPECIES[int(sp.prey)].name.to_lower()
+	if sp.get("cleaner", false):
+		return prefix + "Grazes grime off the glass; the grime feeds it."
+	if sp.get("drifter", false):
+		return prefix + "Pulses up and sinks slowly. Drifts toward food rather than chasing it."
+	return ""
 
 
 func _on_spotless() -> void:
@@ -588,7 +612,8 @@ func _on_money(amount: float, coins: int, by_snail: bool) -> void:
 func _next_goal() -> Dictionary:
 	var best := {}
 	if tank.fishes.size() < capacity():
-		for i in range(min(unlocked, Data.SPECIES.size() - 1) + 1):
+		for p in range(min(unlocked, Data.CHAIN.size() - 1) + 1):
+			var i: int = Data.CHAIN[p]
 			var c := fish_cost(i)
 			if c > money and (best.is_empty() or c < best.cost):
 				best = {"name": Data.SPECIES[i].name, "cost": c}
@@ -781,6 +806,7 @@ func _build_ui() -> void:
 	tank.fish_opened.connect(_open_fish_card)
 	tank.fish_died.connect(_on_fish_died)
 	tank.spotless.connect(_on_spotless)
+	tank.fish_eaten.connect(_on_fish_eaten)
 	# Snail pickups are quieter and rate-limited so they don't get annoying.
 	tank.sfx.connect(func(sound, gain): audio.play(sound, gain, 140 if gain < 0.5 else 45))
 	main_vb.add_child(tank)
@@ -814,8 +840,8 @@ func _build_ui() -> void:
 	var fish_head := HFlowContainer.new()
 	fish_head.add_theme_constant_override("h_separation", 6)
 	fish_head.add_theme_constant_override("v_separation", 4)
-	fish_section_label = _section_label("FISH  (keys 1-6, Shift = buy max)")
-	fish_section_label.tooltip_text = "Keys 1-6 buy fish. Hold Shift to buy as many as you can afford."
+	fish_section_label = _section_label("FISH  (keys 1-8, Shift = buy max)")
+	fish_section_label.tooltip_text = "Keys 1-8 buy fish. Hold Shift to buy as many as you can afford."
 	fish_section_label.mouse_filter = Control.MOUSE_FILTER_PASS
 	fish_head.add_child(fish_section_label)
 	var head_space := Control.new()
@@ -829,7 +855,7 @@ func _build_ui() -> void:
 	fish_flow.add_theme_constant_override("h_separation", 6)
 	fish_flow.add_theme_constant_override("v_separation", 6)
 	shop_box.add_child(fish_flow)
-	for i in Data.SPECIES.size():
+	for i in Data.SHOP_ORDER:
 		var b := _make_button("", _buy_fish.bind(i))
 		fish_flow.add_child(b)
 		fish_buttons.append(b)
@@ -1039,8 +1065,12 @@ func _tip_text(id: String) -> String:
 						return "Coins sink to the sand. Click a $ or drag across them to collect.  (Space collects them all.)"
 		"food":
 			for f in tank.fishes:
-				if f.hunger > 0.7 and not f.dead:
+				if f.hunger > 0.7 and not f.dead and not tank.is_hunter(f):
 					return "A fish is hungry ( ? ). Click the water to drop food *  (or press F)."
+		"shark":
+			for f in tank.fishes:
+				if f.hunger > 0.7 and not f.dead and tank.is_hunter(f):
+					return "Your shark is hungry ( ? ). Sharks don't eat pellets, they hunt guppies. Named guppies are safe."
 		"buy":
 			if lifetime > 0.0 and money >= fish_cost(0) and tank.fishes.size() < capacity():
 				return "You can afford another fish! " + ("Open the [ shop ] (S)." if compact else "Buy one below, or press 1.")
@@ -1175,7 +1205,7 @@ func _style_for_size(small: bool, scale: float) -> void:
 	settings_button.text = "[=]" if small else "[ = ]"
 	help_button.text = "[?]" if small else "[ ? ]"
 	undo_button.text = "[undo]" if small else "[ undo sell ]"
-	fish_section_label.text = "-- FISH --" if small else "-- FISH  (keys 1-6, Shift = buy max) --"
+	fish_section_label.text = "-- FISH --" if small else "-- FISH  (keys 1-8, Shift = buy max) --"
 	fish_list_button.text = "List (L)" if small else "Fish list (L)"
 	for b in [shop_button, pin_button, help_button, settings_button, min_button, close_button, undo_button]:
 		for state in _compact_btn:
@@ -1570,6 +1600,7 @@ func _update_fish_card(cf) -> void:
 		status = "\nSick: slow, no XP, half the good from food."
 	elif cf.weak > 0.0:
 		status = "\nStill weak: no coins for %ds." % int(ceil(cf.weak))
+	status += _species_note(cf.species, "\n")
 	fish_card.update_stats("Level  %s\nFood   [%s%s]\nDrops  $%s every %ss%s" % [
 		lv_txt, "#".repeat(bars), "-".repeat(10 - bars), Data.fmt(tank.fish_value(cf)),
 		str(Data.SPECIES[cf.species].interval), status], "Sell for $%s" % Data.fmt(sell_value(cf)),
@@ -1593,22 +1624,26 @@ func _dirt_warning() -> String:
 
 func _refresh_shop(rate: float) -> void:
 	var full: bool = tank.fishes.size() >= capacity()
-	for i in fish_buttons.size():
-		var b: Button = fish_buttons[i]
+	for j in fish_buttons.size():
+		var b: Button = fish_buttons[j]
+		var i: int = Data.SHOP_ORDER[j]
 		var sp: Dictionary = Data.SPECIES[i]
 		var cost := fish_cost(i)
+		var pos := Data.CHAIN.find(i)
+		if pos < 0:
+			b.visible = settings.values.dirt
 		# The pop-up shop uses short labels so 2-3 buttons fit per row;
 		# the tooltip has the full details.
-		if i > unlocked:
+		if pos > unlocked:
 			b.text = ("??? $" if compact else "???  $") + Data.fmt(cost)
 			b.tooltip_text = "Buy the previous fish to discover this one."
 			b.disabled = true
 		else:
 			b.text = "%s $%s" % [sp.icon, Data.fmt(cost)] if compact else "%s  %s  $%s" % [sp.icon, sp.name, Data.fmt(cost)]
 			var coin: float = max(1.0, round(float(sp.value) * coin_mult()))
-			b.tooltip_text = "%s  (key %d)\nIncome  +$%s/s   (a $%s coin every %ss)\nYou own %d.%s" % [
-				sp.name, i + 1, _fmt_rate(coin / float(sp.interval)), Data.fmt(coin), str(sp.interval),
-				owned(i), "\nThe tank is full." if full else ""]
+			b.tooltip_text = "%s  (key %d)\nIncome  +$%s/s   (a $%s coin every %ss)%s\nYou own %d.%s" % [
+				sp.name, j + 1, _fmt_rate(coin / float(sp.interval)), Data.fmt(coin), str(sp.interval),
+				_species_note(i, "\n"), owned(i), "\nThe tank is full." if full else ""]
 			b.disabled = money < cost or full
 		_mark_affordable(b)
 
@@ -1632,7 +1667,7 @@ func _refresh_shop(rate: float) -> void:
 		int(Data.REVIVE_WINDOW / 60.0), medicine]
 	medicine_button.disabled = money < medicine_cost() or medicine >= MAX_MEDICINE
 	_mark_affordable(medicine_button)
-	for key in ["pleco", "filter", "uv"]:
+	for key in ["sponge", "filter", "uv"]:
 		upgrade_buttons[key].visible = settings.values.dirt
 	medicine_button.visible = settings.values.dirt
 
@@ -1651,13 +1686,20 @@ func _upgrade_tooltip(key: String, rate: float) -> String:
 			if maxed:
 				return "Drops food when fish get hungry.\nNow: %s (max)" % now
 			return "Drops food when fish get hungry.\nNow: %s  ->  every %ds" % [now, int(Data.FEEDER_INTERVAL[lv + 1])]
+		"sponge":
+			var desc: String = Data.UPGRADES[key].desc
+			var line := func(l: int) -> String:
+				return "+%d%% reach, +%d%% strength, holds +%d%%" % [
+					int(round(Data.SPONGE_REACH_PER_LV * l * 100.0)), int(round(Data.SPONGE_POWER_PER_LV * l * 100.0)),
+					int(round(Data.SPONGE_HOLD_PER_LV * l * 100.0))]
+			if maxed:
+				return "%s\nNow: %s (max)" % [desc, line.call(lv)]
+			return "%s\nNow: %s\nNext: %s" % [desc, line.call(lv) if lv > 0 else "the plain sponge", line.call(lv + 1)]
 		"filter", "uv":
 			var now := int(round(Data.dirt_slowdown(upgrades) * 100.0))
 			var after_pct := int(round(Data.dirt_slowdown(after) * 100.0))
 			return "%s\nDirt builds up %d%% slower now%s (all together at most 50%%)." % [Data.UPGRADES[key].desc, now,
 				"" if maxed else " -> %d%%" % after_pct]
-		"pleco":
-			return "%s\nYou have %d." % [Data.UPGRADES[key].desc, lv]
 		"tank":
 			if maxed:
 				return "Room for %d fish (max)." % capacity()
@@ -1722,8 +1764,10 @@ func _load_game(skip_offline := false) -> bool:
 		return false
 	money = float(d.get("money", Data.START_MONEY))
 	lifetime = float(d.get("lifetime", 0.0))
-	unlocked = clampi(int(d.get("unlocked", 1)), 1, Data.SPECIES.size() - 1)
+	unlocked = clampi(int(d.get("unlocked", 1)), 1, Data.CHAIN.size() - 1)
 	var ups = d.get("upgrades", {})
+	# v0.3.0 had algae eaters as an upgrade ("pleco"); now they're fish.
+	var old_plecos := clampi(int(ups.get("pleco", 0)), 0, 3) if typeof(ups) == TYPE_DICTIONARY else 0
 	if typeof(ups) == TYPE_DICTIONARY:
 		for k in ups:
 			if upgrades.has(k):
@@ -1757,6 +1801,12 @@ func _load_game(skip_offline := false) -> bool:
 					f.pos.y = 2.0
 	if tank.living() == 0:
 		tank.add_fish(0, 0, 0, 0.3)
+	_convert_old_plecos(old_plecos)
+	# Owning a fish reveals the next one (e.g. the Jellyfish for shark owners).
+	for f in tank.fishes:
+		var pos := Data.CHAIN.find(f.species)
+		if pos >= 0:
+			unlocked = maxi(unlocked, mini(pos + 1, Data.CHAIN.size() - 1))
 	medicine = clampi(int(d.get("medicine", 0)), 0, MAX_MEDICINE)
 	tank.dirt.load_from(d.get("dirt", null))
 	_save_predates_dirt = not d.has("dirt")
@@ -1769,6 +1819,26 @@ func _load_game(skip_offline := false) -> bool:
 	else:
 		_say("Welcome back!")
 	return true
+
+
+# Old algae eater upgrades become algae eater fish. Levels that don't fit
+# in the tank are refunded at what they cost.
+func _convert_old_plecos(n: int) -> void:
+	if n <= 0:
+		return
+	var added := 0
+	var refund := 0.0
+	for k in n:
+		if tank.fishes.size() < capacity():
+			tank.add_fish(Data.ALGAE_EATER, 0, 0, 0.2)
+			added += 1
+		else:
+			refund += floor(400.0 * pow(3.0, k))
+	money += refund
+	var msg := "Algae eaters are fish now: %d joined your tank." % added if added > 0 else ""
+	if refund > 0.0:
+		msg += (" " if msg != "" else "") + "No room for %d, so you got $%s back." % [n - added, Data.fmt(refund)]
+	_queue_card("-- algae eaters --", msg + "\nThey graze grime off the glass, and the grime feeds them.")
 
 
 func _offline_earnings(secs: float) -> void:
@@ -1789,7 +1859,8 @@ func _offline_earnings(secs: float) -> void:
 		if f.dead:
 			continue
 		var active := secs
-		if upgrades.feeder == 0:
+		# Sharks can't use the feeder, and don't hunt while the game is closed.
+		if upgrades.feeder == 0 or tank.is_hunter(f):
 			active = min(secs, max(0.0, (1.0 - f.hunger) * Data.HUNGER_TIME))
 			f.hunger = min(1.0, f.hunger + secs / Data.HUNGER_TIME)
 		earned += tank.fish_value(f) / float(Data.SPECIES[f.species].interval) * active
@@ -1844,7 +1915,7 @@ func _default_stats() -> Dictionary:
 		"earned_you": 0.0, "earned_snails": 0.0, "earned_offline": 0.0,
 		"coins_you": 0, "coins_snails": 0,
 		"fish_bought": 0, "fish_sold": 0, "food": 0,
-		"fish_died": 0, "fish_revived": 0, "fish_flushed": 0, "spotless": 0,
+		"fish_died": 0, "fish_revived": 0, "fish_flushed": 0, "spotless": 0, "fish_eaten": 0,
 		"play_seconds": 0.0, "best_money": 0.0,
 		"started": Time.get_unix_time_from_system(),
 	}
@@ -1878,6 +1949,7 @@ func _show_stats() -> void:
 		row.call("Fish lost", str(int(stats.fish_died))),
 		row.call("  revived", str(int(stats.fish_revived))),
 		row.call("  flushed", str(int(stats.fish_flushed))),
+		row.call("Guppies eaten", str(int(stats.get("fish_eaten", 0)))),
 		row.call("Best fish", "" if best == null else "%s, lv %d" % [fish_title(best), best.level]),
 	]
 	_fit_popups()

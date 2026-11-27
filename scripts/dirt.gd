@@ -18,6 +18,7 @@ var d := PackedFloat32Array()      # dirt per cell, 0..1
 var hard := PackedFloat32Array()   # stubbornness per cell, 0..1
 var level := 0.0                   # average dirt over the whole glass
 var rate_mult := 1.0               # <1 with filters, >1 with dead fish in the tank
+var version := 0                   # bumps whenever the grime changes (for redraws)
 var _w0 := PackedFloat32Array()    # where grime likes to grow (position x texture)
 var _wbuf := PackedFloat32Array()
 
@@ -57,6 +58,7 @@ func clear() -> void:
 	d.fill(0.0)
 	hard.fill(0.0)
 	level = 0.0
+	version += 1
 	_make_texture()
 
 
@@ -92,6 +94,7 @@ func grow(dt: float, cap := 1.0) -> void:
 		if v > 0.45:
 			hard[i] = minf(1.0, hard[i] + harden)
 	level = sum / float(W * H)
+	version += 1
 	# Now and then a fresh spore lands somewhere and starts its own patch.
 	if randf() < dt * 0.04:
 		_spore()
@@ -200,6 +203,7 @@ func _recount() -> void:
 	for v in d:
 		sum += v
 	level = sum / float(W * H)
+	version += 1
 
 
 func serialize() -> Dictionary:
