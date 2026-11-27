@@ -37,6 +37,29 @@ func _ready() -> void:
 		_sweep(784.0, 784.0, 0.07, 0.3, 3.0, 0.2),
 		_sweep(523.0, 523.0, 0.18, 0.3, 6.0, 0.2),
 	]))
+	# Squeak: a short wobbly high chirp, like a sponge on glass.
+	_streams["squeak"] = _wav(_mix(_sweep(1900.0, 2600.0, 0.06, 0.18, 4.0, 0.4), _sweep(2600.0, 2100.0, 0.05, 0.12, 6.0, 0.3)))
+	# Flush: a long whooshing swirl that drains away.
+	_streams["flush"] = _wav(_mix(_noise(1.1, 0.4, 2.5, 0.08), _sweep(420.0, 90.0, 1.0, 0.18, 2.5, 0.2)))
+	# Death: a slow sad falling tone.
+	_streams["death"] = _wav(_concat([
+		_sweep(392.0, 392.0, 0.18, 0.3, 2.0, 0.3),
+		_sweep(370.0, 370.0, 0.18, 0.3, 2.0, 0.3),
+		_sweep(349.0, 262.0, 0.6, 0.3, 3.0, 0.3),
+	]))
+	# Sparkle: a twinkly run up.
+	_streams["sparkle"] = _wav(_concat([
+		_sweep(1319.0, 1319.0, 0.06, 0.25, 4.0, 0.1),
+		_sweep(1568.0, 1568.0, 0.06, 0.25, 4.0, 0.1),
+		_sweep(1976.0, 1976.0, 0.06, 0.25, 4.0, 0.1),
+		_sweep(2637.0, 2637.0, 0.3, 0.25, 6.0, 0.1),
+	]))
+	# Warning: two low beeps.
+	_streams["warn"] = _wav(_concat([
+		_sweep(330.0, 330.0, 0.12, 0.3, 2.0, 0.5),
+		_sweep(0.0, 0.0, 0.06, 0.0, 1.0, 0.0),
+		_sweep(330.0, 330.0, 0.16, 0.3, 3.0, 0.5),
+	]))
 	for i in VOICES:
 		var p := AudioStreamPlayer.new()
 		add_child(p)

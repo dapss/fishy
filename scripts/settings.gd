@@ -16,6 +16,9 @@ const DEFAULTS := {
 	"tray": false,           # closing / minimizing hides to the system tray
 	"autostart": false,      # cached; the Windows registry is the real source
 	"update_check": true,    # look for a new version on launch
+	"dirt": true,            # the tank gets dirty and needs cleaning
+	"fish_death": true,      # a fully dirty tank can kill fish
+	"seen_version": "",      # last version whose "what's new" was shown
 	"win_x": -1,             # -1 = let the OS place the window
 	"win_y": -1,
 	"win_w": 1000,

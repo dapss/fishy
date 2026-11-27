@@ -1,8 +1,10 @@
 # Card for one fish: give it a name, see its stats, sell it.
 # Opened by right-clicking (or double-clicking) a fish. The main scene fills in the stats.
+# Sick fish get a Cure button; dead fish get Revive and Flush instead of Sell.
 extends Control
 
-signal sell_requested(fish)
+signal sell_requested(fish)          # sell a living fish, or flush a dead one
+signal action_requested(fish)        # use medicine: cure or revive
 
 const MAX_NAME := 16
 
@@ -11,6 +13,7 @@ var _title: Label
 var _name_edit: LineEdit
 var _stats: Label
 var _sell: Button
+var _action: Button
 # Widest the card may get (the main scene sets this from the window width).
 var max_width := 440.0:
 	set(v):
@@ -64,7 +67,15 @@ func _ready() -> void:
 	_stats = Label.new()
 	vb.add_child(_stats)
 
-	var buttons := HBoxContainer.new()
+	var buttons := HFlowContainer.new()
+	buttons.add_theme_constant_override("h_separation", 6)
+	buttons.add_theme_constant_override("v_separation", 6)
+	_action = Button.new()
+	_action.focus_mode = Control.FOCUS_NONE
+	_action.add_theme_color_override("font_color", Color("9dff9d"))
+	_action.visible = false
+	_action.pressed.connect(func(): action_requested.emit(fish))
+	buttons.add_child(_action)
 	_sell = Button.new()
 	_sell.focus_mode = Control.FOCUS_NONE
 	_sell.add_theme_color_override("font_color", Color("ff8a8a"))
@@ -99,9 +110,13 @@ func _on_name_changed(t: String) -> void:
 		fish.nickname = t.strip_edges()
 
 
-func update_stats(stats: String, sell_text: String) -> void:
+# action_text "" hides the medicine button.
+func update_stats(stats: String, sell_text: String, action_text := "", action_tip := "") -> void:
 	_stats.text = stats
 	_sell.text = sell_text
+	_action.visible = action_text != ""
+	_action.text = action_text
+	_action.tooltip_text = action_tip
 
 
 func close() -> void:

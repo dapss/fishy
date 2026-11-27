@@ -5,8 +5,11 @@ extends Control
 signal money_earned(amount: float, coins: int, by_snail: bool)
 signal fish_opened(fish)              # right-clicked or double-clicked a fish
 signal sfx(sound: String, gain: float)
+signal fish_died(fish)                # dirty water killed a fish
+signal spotless                       # scrubbed a dirty tank completely clean
 
 const Data = preload("res://scripts/data.gd")
+const Dirt = preload("res://scripts/dirt.gd")
 
 const MIRROR := {
 	"<": ">", ">": "<", "(": ")", ")": "(", "[": "]", "]": "[",
@@ -42,6 +45,21 @@ const C_SILVER := Color("dfe6f0")
 const C_GOLD := Color("ffd84d")
 const C_GEM := Color("7ff9ff")
 const C_FEEDER := Color("9fb3c8")
+const C_ALGAE := Color("6b8a3a")
+const C_GRIME := Color("4a4128")
+const C_SICK := Color("8fd16b")
+const C_DEAD := Color("6c7480")
+const C_BONE := Color("d8d2c0")
+const C_PLECO := Color("b08a5a")
+const GRIME := [".", ".,", ":;", ";%", "%&", "#&%", "#@&"]
+const PLECO_RIGHT := "-=(o"
+const PLECO_LEFT := "o)=-"
+# Sponge physics. Speeds are in cells per second.
+const SPONGE_POWER := 0.75        # share of the grime one slow pass takes
+const SPONGE_FAST := 45.0         # strokes faster than this mostly skim
+const SPONGE_LOAD_PER_DIRT := 1.0 / 350.0
+const SPONGE_RADIUS := Vector2(1.9, 1.25)
+const SPOTLESS_BELOW := 0.03       # scrub below this and the rest wipes off: sparkling!
 
 
 class Fish extends RefCounted:
@@ -62,6 +80,12 @@ class Fish extends RefCounted:
 	var blink := 0.0          # >0 while the eyes are closed
 	var next_blink := 3.0
 	var nickname := ""
+	var sick := false
+	var drain := 0.0          # time spent sick in filthy water (level loss)
+	var dead := false
+	var revive_left := 0.0    # seconds left to revive (counts only while running)
+	var skeleton := false     # too late to revive; can only be flushed
+	var weak := 0.0           # just revived: no coins for a while
 
 
 var font: Font
@@ -87,6 +111,21 @@ var feeder_level := 0
 var has_castle := false
 var transparent_outside := false   # don't paint the area around the glass
 var player_food := 0               # pellets the player dropped (read and reset by stats)
+
+var dirt := Dirt.new()
+var dirt_enabled := true
+var deaths_enabled := true
+var dirt_rate_mult := 1.0          # filters and the UV lamp make this smaller
+var clean_mode := false
+var sponge_load := 0.0             # 0 clean .. 1 so full of grime it barely cleans
+var boost_time := 0.0              # spotless bonus
+var full_time := 0.0               # how long the tank has been fully covered
+var plecos: Array = []             # {pos, target, dir}
+var _dirt_t := 0.0
+var _dirt_peak := 0.0              # dirtiest it got since the last spotless clean
+var _scrubbing := false
+var _sponge_shown := -1
+var _sponge_cursors: Array = []
 
 var hovered: Fish = null
 var mouse_cell := Vector2(-100, -100)
@@ -241,6 +280,11 @@ func add_fish(species: int, level := 0, xp := 0, hunger := 0.2, splash := false)
 
 # Empties the tank (used when the player resets their save).
 func reset() -> void:
+	dirt.clear()
+	full_time = 0.0
+	boost_time = 0.0
+	sponge_load = 0.0
+	_dirt_peak = 0.0
 	fishes.clear()
 	foods.clear()
 	coins.clear()
@@ -257,15 +301,89 @@ func remove_fish(f: Fish) -> void:
 
 func fish_value(f: Fish) -> float:
 	var sp: Dictionary = Data.SPECIES[f.species]
-	return max(1.0, round(float(sp.value) * (1.0 + 0.5 * f.level) * coin_mult))
+	return max(1.0, round(float(sp.value) * (1.0 + 0.5 * f.level) * coin_mult * water_mult()))
+
+
+# Dirty water earns less; a freshly scrubbed tank earns a bit more.
+func water_mult() -> float:
+	var m := Data.dirt_penalty(dirt.level) if dirt_enabled else 1.0
+	if boost_time > 0.0:
+		m *= Data.SPARKLE_BONUS
+	return m
 
 
 func estimate_rate() -> float:
 	var r := 0.0
 	for f in fishes:
-		if f.hunger < 1.0:
+		if f.hunger < 1.0 and not f.dead and f.weak <= 0.0:
 			r += fish_value(f) / float(Data.SPECIES[f.species].interval)
 	return r
+
+
+func living() -> int:
+	var n := 0
+	for f in fishes:
+		if not f.dead:
+			n += 1
+	return n
+
+
+func dirt_level() -> float:
+	return dirt.level if dirt_enabled else 0.0
+
+
+# Seconds until the next fish dies, or -1 if nothing is about to die.
+func death_countdown() -> float:
+	if not deaths_enabled or full_time <= 0.0 or not _someone_can_die():
+		return -1.0
+	return maxf(0.0, Data.DEATH_AFTER - full_time)
+
+
+func _someone_can_die() -> bool:
+	return living() > 1
+
+
+func kill(f: Fish) -> void:
+	f.dead = true
+	f.sick = false
+	f.revive_left = Data.REVIVE_WINDOW
+	f.target = Vector2(f.pos.x, 2.0)
+	_popup("x_x", f.pos + Vector2(f.w * 0.5, -0.6), C_DEAD)
+	sfx.emit("death", 1.0)
+	fish_died.emit(f)
+
+
+func revive(f: Fish) -> void:
+	f.dead = false
+	f.skeleton = false
+	f.sick = false
+	f.level = maxi(0, f.level - 1)
+	f.xp = 0
+	f.hunger = 0.3
+	f.weak = Data.REVIVE_WEAK
+	f.target = _random_spot(f)
+	_popup("revived!", f.pos + Vector2(f.w * 0.5, -0.6), Color("9dff9d"))
+	sfx.emit("level", 1.0)
+
+
+func cure(f: Fish) -> void:
+	f.sick = false
+	f.drain = 0.0
+	_popup("cured!", f.pos + Vector2(f.w * 0.5, -0.6), Color("9dff9d"))
+
+
+func set_plecos(n: int) -> void:
+	while plecos.size() > n:
+		plecos.pop_back()
+	while plecos.size() < n:
+		var p := Vector2(randf_range(2.0, cols - 6.0), randf_range(2.0, sand_row() - 2.0))
+		plecos.append({"pos": p, "target": p, "dir": 1})
+
+
+func set_clean_mode(on: bool) -> void:
+	clean_mode = on
+	_scrubbing = false
+	_update_cursor()
 
 
 func set_snails(n: int) -> void:
@@ -295,7 +413,13 @@ func set_weeds(n: int) -> void:
 func serialize_fish() -> Array:
 	var out := []
 	for f in fishes:
-		out.append({"s": f.species, "lv": f.level, "xp": f.xp, "hg": snappedf(f.hunger, 0.001), "n": f.nickname})
+		var e := {"s": f.species, "lv": f.level, "xp": f.xp, "hg": snappedf(f.hunger, 0.001), "n": f.nickname}
+		if f.sick:
+			e["sick"] = true
+		if f.dead:
+			e["dead"] = snappedf(f.revive_left, 0.1)
+			e["bones"] = f.skeleton
+		out.append(e)
 	return out
 
 
@@ -316,6 +440,8 @@ func _process(dt: float) -> void:
 	_update_bubbles(dt)
 	_update_feeder(dt)
 	_update_misc(dt)
+	_update_dirt(dt)
+	_update_plecos(dt)
 	_update_hover()
 	queue_redraw()
 
@@ -323,8 +449,12 @@ func _process(dt: float) -> void:
 func _update_fish(dt: float) -> void:
 	for f: Fish in fishes:
 		var sp: Dictionary = Data.SPECIES[f.species]
+		if f.dead:
+			_update_dead(f, dt)
+			continue
 		f.hunger = min(1.0, f.hunger + dt / Data.HUNGER_TIME)
-		var spd := f.speed
+		f.weak = maxf(0.0, f.weak - dt)
+		var spd := f.speed * (0.5 if f.sick else 1.0)
 		var chasing := false
 
 		# Hungry fish chase the nearest food.
@@ -372,8 +502,8 @@ func _update_fish(dt: float) -> void:
 				_eat(f)
 				break
 
-		# Drop coins while not starving.
-		if f.hunger < 1.0:
+		# Drop coins while not starving (and not still weak from being revived).
+		if f.hunger < 1.0 and f.weak <= 0.0:
 			f.coin_timer += dt
 			if f.coin_timer >= float(sp.interval):
 				f.coin_timer = 0.0
@@ -383,9 +513,22 @@ func _update_fish(dt: float) -> void:
 				})
 
 
+# Dead fish float up to the surface and bob there. The revive window only
+# runs while the game is open.
+func _update_dead(f: Fish, dt: float) -> void:
+	if not f.skeleton:
+		f.revive_left -= dt
+		if f.revive_left <= 0.0:
+			f.skeleton = true
+			_popup("too late...", f.pos + Vector2(f.w * 0.5, -0.6), C_DEAD)
+	var goal := Vector2(f.pos.x + sin(time * 0.3 + f.phase) * 0.2, 2.0)
+	f.pos = f.pos.move_toward(_clamp_fish(f, goal), 0.8 * dt)
+
+
 func _eat(f: Fish) -> void:
-	f.hunger = max(0.0, f.hunger - Data.FOOD_VALUE)
-	if f.level >= Data.MAX_LEVEL:
+	# Sick fish only get half the good out of food, and learn nothing.
+	f.hunger = max(0.0, f.hunger - Data.FOOD_VALUE * (0.5 if f.sick else 1.0))
+	if f.level >= Data.MAX_LEVEL or f.sick:
 		return
 	f.xp += 1
 	if f.xp >= Data.xp_needed(f.level):
@@ -403,7 +546,9 @@ func _update_food(dt: float) -> void:
 			fd.pos.x += sin(time * 3.0 + fd.pos.y) * 0.4 * dt
 		else:
 			fd.rest += dt
-			if fd.rest > 25.0:
+			# In dirty water, food that lands in grime is lost quickly.
+			var lost := dirt_level() >= Data.DIRTY_AT and dirt_at(fd.pos) > 0.5
+			if fd.rest > (3.0 if lost else 25.0):
 				foods.remove_at(i)
 
 
@@ -459,7 +604,7 @@ func _update_snails(dt: float) -> void:
 		if s.target == null:
 			var best := INF
 			for c in coins:
-				if c.landed and c.pos.x >= lane.x and c.pos.x < lane.y:
+				if c.landed and c.pos.x >= lane.x and c.pos.x < lane.y and not _buried(c):
 					var d: float = abs(c.pos.x - center)
 					if d < best:
 						best = d
@@ -476,6 +621,8 @@ func _update_snails(dt: float) -> void:
 			goal = s.idle_x
 		var dx: float = goal - center
 		var spd: float = s.speed if s.target != null else s.speed * 0.4
+		if dirt_level() >= Data.SICK_AT:
+			spd *= 0.5
 		s.moving = abs(dx) > 0.3
 		if s.moving:
 			s.dir = 1 if dx > 0.0 else -1
@@ -485,7 +632,7 @@ func _update_snails(dt: float) -> void:
 		# Collect any landed coin under the snail.
 		for j in range(coins.size() - 1, -1, -1):
 			var c: Dictionary = coins[j]
-			if c.landed and abs(c.pos.x - (s.x + 1.0)) < 1.6:
+			if c.landed and abs(c.pos.x - (s.x + 1.0)) < 1.6 and not _buried(c):
 				_collect(j, true)
 
 
@@ -500,7 +647,8 @@ func _update_bubbles(dt: float) -> void:
 		if not fishes.is_empty() and randf() < 0.25:
 			var f: Fish = fishes.pick_random()
 			var mouth_x: float = f.pos.x + (f.w if f.facing > 0 else -1.0)
-			bubbles.append({"pos": Vector2(mouth_x, f.pos.y), "speed": randf_range(1.5, 2.5), "seed": randf() * TAU})
+			if not f.dead:
+				bubbles.append({"pos": Vector2(mouth_x, f.pos.y), "speed": randf_range(1.5, 2.5), "seed": randf() * TAU})
 	for i in range(bubbles.size() - 1, -1, -1):
 		var b: Dictionary = bubbles[i]
 		b.pos.y -= b.speed * dt
@@ -518,7 +666,7 @@ func _update_feeder(dt: float) -> void:
 		return
 	var anyone_hungry := false
 	for f in fishes:
-		if f.hunger > 0.4:
+		if f.hunger > 0.4 and not f.dead:
 			anyone_hungry = true
 			break
 	if anyone_hungry:
@@ -546,6 +694,168 @@ func _update_misc(dt: float) -> void:
 		if m.pos.x > cols - 2: m.pos.x = 1
 		if m.pos.y < 2: m.pos.y = sand_row() - 1
 		if m.pos.y > sand_row() - 1: m.pos.y = 2
+
+
+# ---------------------------------------------------------------- dirt
+
+# Cell coordinates -> 0..1 across the glass (the water, waterline included).
+func _glass_uv(p: Vector2) -> Vector2:
+	return Vector2((p.x - 1.0) / maxf(1.0, cols - 2.0), (p.y - 1.0) / maxf(1.0, sand_row() - 1.0))
+
+
+func dirt_at(p: Vector2) -> float:
+	if not dirt_enabled:
+		return 0.0
+	return dirt.sample((p.x - 0.5) / maxf(1.0, cols - 2.0), (p.y - 0.5) / maxf(1.0, sand_row() - 1.0))
+
+
+func _buried(c: Dictionary) -> bool:
+	return dirt_level() >= Data.DIRTY_AT and dirt_at(c.pos) > 0.6
+
+
+func _update_dirt(dt: float) -> void:
+	boost_time = maxf(0.0, boost_time - dt)
+	if not dirt_enabled:
+		full_time = 0.0
+		for f in fishes:
+			f.sick = false
+		return
+	_dirt_t += dt
+	if _dirt_t >= 0.5:
+		# Dead fish left in the tank foul the water.
+		var mult := dirt_rate_mult
+		for f in fishes:
+			if f.dead:
+				mult += 0.3 if f.skeleton else 0.15
+		dirt.rate_mult = mult
+		dirt.grow(_dirt_t)
+		_dirt_t = 0.0
+	_dirt_peak = maxf(_dirt_peak, dirt.level)
+	# Rinse the sponge by taking it out of the water for a moment.
+	if clean_mode and not in_water(mouse_cell) and sponge_load > 0.0:
+		sponge_load = maxf(0.0, sponge_load - dt * 0.9)
+	if clean_mode:
+		_update_sponge_cursor()
+
+	var lv := dirt.level
+	for f in fishes:
+		if f.dead:
+			continue
+		if lv >= Data.SICK_AT:
+			if not f.sick and randf() < dt / 40.0:
+				f.sick = true
+				_popup("sick", f.pos + Vector2(f.w * 0.5, -0.6), C_SICK)
+		elif f.sick:
+			# Clean water cures sickness right away.
+			cure(f)
+		if f.sick and lv >= Data.FILTHY_AT:
+			f.drain += dt
+			if f.drain >= Data.LEVEL_DRAIN:
+				f.drain = 0.0
+				if f.level > 0:
+					f.level -= 1
+					f.xp = 0
+					_popup("lvl -1", f.pos + Vector2(f.w * 0.5, -0.6), Color("ff8a8a"))
+					sfx.emit("sell", 0.6)
+
+	# A fully covered tank starts killing fish, one at a time, never the last one.
+	if lv >= Data.FULL_AT and deaths_enabled:
+		full_time += dt
+		if full_time >= Data.DEATH_AFTER and _someone_can_die():
+			var victim: Fish = null
+			for f in fishes:
+				if not f.dead and (victim == null or (f.sick and not victim.sick)
+						or (f.sick == victim.sick and fish_value(f) < fish_value(victim))):
+					victim = f
+			if victim != null:
+				kill(victim)
+			full_time = Data.DEATH_AFTER - Data.DEATH_EVERY
+	elif lv < Data.FILTHY_AT:
+		full_time = 0.0
+
+
+func _update_plecos(dt: float) -> void:
+	for p in plecos:
+		var to: Vector2 = p.target - p.pos
+		if to.length() < 0.3:
+			# Head for the dirtiest of a few random spots.
+			var best: Vector2 = p.pos
+			var best_d := -1.0
+			for k in 5:
+				var c := Vector2(randf_range(2.0, cols - 6.0), randf_range(2.0, sand_row() - 2.0))
+				var dd := dirt_at(c)
+				if dd > best_d:
+					best_d = dd
+					best = c
+			p.target = best
+		else:
+			var step := to.normalized() * minf(to.length(), 2.2 * dt)
+			p.pos += step
+			if abs(to.x) > 0.2:
+				p.dir = 1 if to.x > 0.0 else -1
+		if dirt_enabled:
+			dirt.nibble(_glass_uv(p.pos + Vector2(2, 0.5)), Vector2(2.2 / cols, 1.2 / maxf(1.0, sand_row())), 0.5 * dt)
+
+
+# One stroke of the sponge from a to b (cells). Slow, steady strokes clean
+# best; flicks skim; a grimy sponge cleans worse and smears more.
+func _scrub(a: Vector2, b: Vector2, velocity_px: Vector2) -> void:
+	if not dirt_enabled:
+		return
+	var speed := (velocity_px / cell).length()
+	var speed_eff := clampf(1.25 - speed / SPONGE_FAST, 0.2, 1.0)
+	var power := SPONGE_POWER * speed_eff * (1.0 - 0.8 * sponge_load)
+	var smear := clampf(0.04 + 0.45 * (1.0 - speed_eff) + 0.3 * sponge_load, 0.0, 0.8)
+	var r := Vector2(SPONGE_RADIUS.x / maxf(1.0, cols - 2.0), SPONGE_RADIUS.y / maxf(1.0, sand_row() - 1.0))
+	var got := dirt.wipe(_glass_uv(a), _glass_uv(b), r, power, smear)
+	sponge_load = minf(1.0, sponge_load + got * SPONGE_LOAD_PER_DIRT)
+	if got > 0.05:
+		sfx.emit("squeak", clampf(got * 0.4, 0.15, 0.5))
+		if randf() < 0.3:
+			bubbles.append({"pos": b, "speed": randf_range(1.5, 3.0), "seed": randf() * TAU})
+	if _dirt_peak > 0.15 and dirt.level < SPOTLESS_BELOW:
+		_dirt_peak = 0.0
+		boost_time = Data.SPARKLE_TIME
+		dirt.clear()
+		_popup("* sparkling! +25% coins *", Vector2(cols * 0.5, rows * 0.4), C_GEM)
+		sfx.emit("sparkle", 1.0)
+		spotless.emit()
+
+
+func rinse() -> void:
+	if sponge_load > 0.02:
+		sponge_load = 0.0
+		sfx.emit("splash", 0.4)
+		_popup("rinsed", mouse_cell + Vector2(0, -1.0), C_SURFACE)
+
+
+# The sponge cursor gets browner as it fills with grime.
+func _update_sponge_cursor() -> void:
+	var bucket := int(sponge_load * 4.0 + 0.5)
+	if bucket == _sponge_shown:
+		return
+	_sponge_shown = bucket
+	if _sponge_cursors.is_empty():
+		for k in 5:
+			_sponge_cursors.append(_make_sponge(float(k) / 4.0))
+	Input.set_custom_mouse_cursor(_sponge_cursors[bucket], Input.CURSOR_CAN_DROP, Vector2(11, 8))
+
+
+static func _make_sponge(load_: float) -> ImageTexture:
+	var img := Image.create(22, 16, false, Image.FORMAT_RGBA8)
+	var body := Color("f2d25c").lerp(Color("6b5a2a"), load_)
+	for y in 16:
+		for x in 22:
+			var edge := x == 0 or x == 21 or y == 0 or y == 15
+			if edge:
+				img.set_pixel(x, y, Color("1a140a"))
+			elif (x * 7 + y * 13) % 11 == 0:
+				img.set_pixel(x, y, body.darkened(0.35))     # sponge holes
+			elif y < 4:
+				img.set_pixel(x, y, Color("3fae6a").lerp(Color("2a4a2a"), load_))   # scrub side
+			else:
+				img.set_pixel(x, y, body)
+	return ImageTexture.create_from_image(img)
 
 
 func _update_hover() -> void:
@@ -589,8 +899,12 @@ func _popup(text: String, p: Vector2, color: Color) -> Dictionary:
 # ---------------------------------------------------------------- input
 
 func _gui_input(event: InputEvent) -> void:
+	var prev := mouse_cell
 	if event is InputEventMouse:
 		mouse_cell = (event.position - origin) / cell
+	if clean_mode:
+		_clean_input(event, prev)
+		return
 	if event is InputEventMouseMotion:
 		if event.button_mask & MOUSE_BUTTON_MASK_LEFT:
 			_collect_near(mouse_cell)   # drag over coins to scoop them up
@@ -615,6 +929,26 @@ func _gui_input(event: InputEvent) -> void:
 			accept_event()
 
 
+# Clean mode: hold left and drag to scrub, right-click to rinse the sponge.
+func _clean_input(event: InputEvent, prev: Vector2) -> void:
+	if event is InputEventMouseMotion:
+		if _scrubbing and event.button_mask & MOUSE_BUTTON_MASK_LEFT and _on_glass(mouse_cell):
+			_scrub(prev if _on_glass(prev) else mouse_cell, mouse_cell, event.velocity)
+		_update_cursor()
+	elif event is InputEventMouseButton:
+		if event.button_index == MOUSE_BUTTON_LEFT:
+			_scrubbing = event.pressed
+			if event.pressed and _on_glass(mouse_cell):
+				_scrub(mouse_cell, mouse_cell, Vector2.ZERO)
+		elif event.button_index == MOUSE_BUTTON_RIGHT and event.pressed:
+			rinse()
+	accept_event()
+
+
+func _on_glass(p: Vector2) -> bool:
+	return p.y > 0.5 and p.y < sand_row() and p.x > 0.5 and p.x < cols - 0.5
+
+
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_MOUSE_EXIT:
 		mouse_cell = Vector2(-100, -100)
@@ -634,7 +968,10 @@ func _coin_near(p: Vector2) -> bool:
 # Hand over coins (click collects), food pellet over water (click feeds).
 func _update_cursor() -> void:
 	var shape := Control.CURSOR_ARROW
-	if _coin_near(mouse_cell):
+	if clean_mode:
+		if _on_glass(mouse_cell):
+			shape = Control.CURSOR_CAN_DROP
+	elif _coin_near(mouse_cell):
 		shape = Control.CURSOR_POINTING_HAND
 	elif in_water(mouse_cell):
 		shape = Control.CURSOR_CROSS
@@ -771,11 +1108,59 @@ func _draw() -> void:
 	for f: Fish in order:
 		_draw_fish(f)
 
+	if dirt_enabled and dirt.level > 0.0005:
+		_draw_dirt()
+
+	for p in plecos:
+		_put(p.pos.x, p.pos.y, PLECO_RIGHT if p.dir > 0 else PLECO_LEFT, C_PLECO)
+
+	# Revive countdowns stay readable through the grime.
+	for f: Fish in fishes:
+		if f.dead and not f.skeleton:
+			var left := int(ceil(f.revive_left))
+			var label := "x_x %d:%02d" % [left / 60, left % 60]
+			var lx := clampf(f.pos.x, 1.0, cols - 1.0 - label.length())
+			var ly := maxf(1.0, f.pos.y - 1.0 + sin(time * 1.2 + f.phase) * 0.15)
+			draw_rect(Rect2(origin + Vector2(lx, ly) * cell, Vector2(label.length(), 1) * cell), Color(0.03, 0.05, 0.08, 0.7))
+			_put(lx, ly, label, Color("ff8a8a"))
+
+	if clean_mode and _on_glass(mouse_cell):
+		# Show the sponge's reach so you can see what a stroke will cover.
+		var c := origin + (mouse_cell - SPONGE_RADIUS) * cell
+		draw_rect(Rect2(c, SPONGE_RADIUS * 2.0 * cell), Color(1, 0.9, 0.5, 0.18), false, 1.0)
+
 	for p in popups:
 		var a: float = clamp(p.life / 0.6, 0.0, 1.0)
 		var col: Color = p.color
 		col.a = a
 		_put(p.pos.x - String(p.text).length() * 0.5, p.pos.y, p.text, col)
+
+
+# Grime on the glass: a murky tint that hides what's behind it, with
+# denser characters where it's thicker.
+func _draw_dirt() -> void:
+	var water_rows := sand_row() - 1
+	for y in range(1, sand_row()):
+		for x in range(1, cols - 1):
+			var v := dirt.sample((x - 0.5) / float(cols - 2), (y - 0.5) / float(water_rows))
+			if v < 0.06:
+				continue
+			var col := C_ALGAE.lerp(C_GRIME, clampf(v * 1.2 - 0.2, 0.0, 1.0))
+			var tint := col
+			tint.a = clampf(pow(v, 1.6) * 0.9, 0.0, 0.88)
+			# Whole pixels, edge to edge: no seams or overlaps between cells.
+			var p0 := (origin + Vector2(x, y) * cell).floor()
+			var p1 := (origin + Vector2(x + 1, y + 1) * cell).floor()
+			draw_rect(Rect2(p0, p1 - p0), tint)
+			# Irregular ASCII grime, thicker characters where it's thicker.
+			# Light film is just a tint; characters only where grime is visible.
+			if v < 0.22:
+				continue
+			var tier: String = GRIME[mini(int(v * GRIME.size()), GRIME.size() - 1)]
+			var ch := tier[absi((x * 73856093) ^ (y * 19349663)) % tier.length()]
+			var gc := col.lightened(0.12)
+			gc.a = clampf(0.22 + v * 0.45, 0.0, 0.7)
+			_put(x, y, ch, gc)
 
 
 func _draw_fish(f: Fish) -> void:
@@ -784,6 +1169,9 @@ func _draw_fish(f: Fish) -> void:
 	var frames: Array = spr_data.r if f.facing > 0 else spr_data.l
 	var spr: Array = frames[int(f.anim) % frames.size()]
 	var mask: Array = spr_data.mr if f.facing > 0 else spr_data.ml
+	if f.dead:
+		_draw_dead(f, spr, mask)
+		return
 
 	var body: Color = sp.color
 	var accent: Color = sp.get("accent", body)
@@ -800,6 +1188,8 @@ func _draw_fish(f: Fish) -> void:
 	for key in palette:
 		var c: Color = palette[key]
 		c = c.lerp(gray, dim)
+		if f.sick:
+			c = c.lerp(C_SICK, 0.4)
 		if f == hovered:
 			c = c.lightened(0.15)
 		palette[key] = c
@@ -839,7 +1229,39 @@ func _draw_fish(f: Fish) -> void:
 	var head_x := f.pos.x + (f.w - 1 if f.facing > 0 else 0)
 	if f.hunger >= 1.0:
 		_put(head_x, f.pos.y - 1 + bob, "!", Color("ff5c5c"))
+	elif f.sick:
+		_put(head_x, f.pos.y - 1 + bob, "~", C_SICK)
 	elif f.hunger > 0.7:
 		_put(head_x, f.pos.y - 1 + bob, "?", Color("ffcf5c"))
 	if f == hovered and f.level > 0:
 		_put(f.pos.x, f.pos.y + spr.size() + bob, "*".repeat(f.level), Color("9dff9d"))
+
+
+# Belly-up and grey with x eyes, or just bones once it's too late.
+func _draw_dead(f: Fish, spr: Array, mask: Array) -> void:
+	var bob := sin(time * 1.2 + f.phase) * 0.15
+	if f == hovered:
+		var pad := Vector2(cell.x * 0.6, cell.y * 0.35)
+		draw_rect(Rect2(origin + Vector2(f.pos.x * cell.x, (f.pos.y + bob) * cell.y) - pad,
+			Vector2(f.w * cell.x, f.h * cell.y) + pad * 2.0), Color(C_DEAD, 0.5), false, 1.0)
+	if f.skeleton:
+		var bones := ">" + "-}".repeat(maxi(1, (f.w - 3) / 2)) + "x>"
+		if f.facing < 0:
+			bones = String(_mirror([bones])[0])
+		_put(f.pos.x, f.pos.y + floorf((f.h - 1) * 0.5) + bob, bones, C_BONE)
+		return
+	var n := spr.size()
+	for k in n:
+		# Upside down: draw the rows bottom to top.
+		var row: String = spr[n - 1 - k]
+		var mrow: String = mask[n - 1 - k]
+		var y := f.pos.y + k + bob
+		var base := origin + Vector2(f.pos.x * cell.x, y * cell.y + ascent)
+		for i in row.length():
+			var ch := row[i]
+			if ch == " ":
+				continue
+			if mrow[i] == "e":
+				ch = "x"
+			draw_char(font, base + Vector2(i * cell.x, 0).round(), ch, font_size,
+				C_DEAD.lightened(0.15) if f == hovered else C_DEAD)

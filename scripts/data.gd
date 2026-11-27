@@ -9,6 +9,23 @@ const MAX_LEVEL := 5
 const START_MONEY := 15.0
 const OFFLINE_CAP_SECONDS := 12 * 3600
 
+# Dirty water. Levels are the average grime on the glass (0..1).
+const DIRTY_AT := 0.3            # food sinks into grime, snails skip buried coins
+const SICK_AT := 0.6             # fish get sick
+const FILTHY_AT := 0.85          # sick fish lose levels
+const FULL_AT := 0.95            # fully covered: the death timer runs
+const OFFLINE_DIRT_CAP := 0.85   # grime stops growing here while the game is closed
+const DEATH_AFTER := 600.0       # seconds fully covered before the first death
+const DEATH_EVERY := 180.0       # then one more death this often
+const LEVEL_DRAIN := 150.0       # filthy water: a sick fish drops a level this often
+const REVIVE_WINDOW := 300.0     # seconds (while the game runs) to revive a dead fish
+const REVIVE_WEAK := 60.0        # a revived fish drops no coins for this long
+const SPARKLE_TIME := 180.0      # spotless bonus lasts this long
+const SPARKLE_BONUS := 1.25
+const FLUSH_REFUND := 0.25       # share of the sell price you get back for flushing
+# Coin multiplier by dirt level (points are joined with straight lines).
+const DIRT_PENALTY := [[0.0, 1.0], [0.3, 0.9], [0.6, 0.7], [0.85, 0.4], [1.0, 0.1]]
+
 # Sprites face RIGHT and are mirrored automatically for swimming left,
 # unless "left" frames are given.
 #   frames: animation frames (tail wag). Every frame is a list of rows.
@@ -137,28 +154,40 @@ const SPECIES := [
 # key -> data. Cost = base * growth ^ current_level.
 const UPGRADES := {
 	"snail": {
-		"name": "Snail _@'", "base": 120, "growth": 4.0, "max": 4,
+		"short": "Snail", "name": "Snail _@'", "base": 120, "growth": 4.0, "max": 4,
 		"desc": "A snail crawls the sand and collects coins for you.",
 	},
 	"feeder": {
-		"name": "Auto-feeder", "base": 200, "growth": 2.5, "max": 5,
+		"short": "Feeder", "name": "Auto-feeder", "base": 200, "growth": 2.5, "max": 5,
 		"desc": "Drops food when fish get hungry. Each level feeds more often.",
 	},
 	"minerals": {
-		"name": "Minerals", "base": 300, "growth": 2.2, "max": 10,
+		"short": "Minerals", "name": "Minerals", "base": 300, "growth": 2.2, "max": 10,
 		"desc": "Coins are worth x1.25 per level.",
 	},
 	"tank": {
-		"name": "Bigger tank", "base": 150, "growth": 2.0, "max": 8,
+		"short": "Tank+", "name": "Bigger tank", "base": 150, "growth": 2.0, "max": 8,
 		"desc": "Room for 2 more fish.",
 	},
 	"weed": {
-		"name": "Seaweed )(", "base": 50, "growth": 1.6, "max": 8,
+		"short": "Weed", "name": "Seaweed )(", "base": 50, "growth": 1.6, "max": 8,
 		"desc": "Fish are happier: +5% coin value each.",
 	},
 	"castle": {
-		"name": "Castle [~]", "base": 5000, "growth": 1.0, "max": 1,
+		"short": "Castle", "name": "Castle [~]", "base": 5000, "growth": 1.0, "max": 1,
 		"desc": "A tiny castle. +25% coin value.",
+	},
+	"pleco": {
+		"short": "Pleco", "name": "Algae eater -=(o", "base": 400, "growth": 3.0, "max": 3,
+		"desc": "Sticks to the glass and nibbles grime wherever it goes.",
+	},
+	"filter": {
+		"short": "Filter", "name": "Filter [=]", "base": 250, "growth": 2.5, "max": 3,
+		"desc": "The tank gets dirty 12% slower per level.",
+	},
+	"uv": {
+		"short": "UV", "name": "UV lamp", "base": 25000, "growth": 1.0, "max": 1,
+		"desc": "The tank gets dirty 20% slower.",
 	},
 }
 
@@ -168,6 +197,20 @@ const FEEDER_INTERVAL := [0.0, 30.0, 22.0, 15.0, 10.0, 6.0]
 static func upgrade_cost(key: String, level: int) -> float:
 	var u: Dictionary = UPGRADES[key]
 	return floor(float(u.base) * pow(float(u.growth), level))
+
+
+# How much slower the tank gets dirty (0..0.5) with these upgrades.
+static func dirt_slowdown(ups: Dictionary) -> float:
+	return minf(0.5, 0.12 * int(ups.get("filter", 0)) + 0.2 * int(ups.get("uv", 0)))
+
+
+static func dirt_penalty(level: float) -> float:
+	for i in range(1, DIRT_PENALTY.size()):
+		var a: Array = DIRT_PENALTY[i - 1]
+		var b: Array = DIRT_PENALTY[i]
+		if level <= b[0]:
+			return lerpf(a[1], b[1], (level - a[0]) / (b[0] - a[0]))
+	return DIRT_PENALTY[-1][1]
 
 
 static func xp_needed(level: int) -> int:

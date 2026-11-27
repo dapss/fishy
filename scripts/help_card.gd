@@ -3,6 +3,7 @@
 extends Control
 
 signal tips_reset_requested
+signal whats_new_requested
 
 const SECTIONS := [
 	["HOW TO PLAY", [
@@ -11,11 +12,15 @@ const SECTIONS := [
 		"Fed fish gain XP and level up (max 5). Higher levels drop bigger coins.",
 		"Spend coins in the shop on more fish and upgrades. A snail collects coins for you, the auto-feeder feeds for you.",
 		"Your fish keep earning while the game is closed.",
+		"The glass gets dirty over time. Dirty water earns less, then makes fish sick ( ~ ), then costs them levels. Left fully covered, fish start to die.",
+		"Clean mode (W): hold the left button and scrub. Slow strokes clean best, fast ones just smear. A grimy sponge cleans badly: right-click to rinse it. Scrub it spotless for +25% coins for a while.",
+		"A dead fish can be revived with Fish Medicine within 5 minutes of play (clean the tank first), or flushed. Medicine also cures sick fish. Algae eaters, a filter and a UV lamp slow the grime down.",
 	]],
 	["MOUSE", [
 		"Click the water: drop food",
 		"Click or drag over $: collect coins",
-		"Right-click a fish (or double-click): its card, to name or sell it",
+		"Right-click a fish (or double-click): its card, to name, sell, cure, revive or flush it",
+		"Clean mode: hold left and drag to scrub, right-click to rinse the sponge",
 		"Shift-click a shop button (or Shift+1-6): buy as many as you can afford",
 		"Drag the top bar, or Alt+drag anywhere: move the window",
 	]],
@@ -26,6 +31,7 @@ const SECTIONS := [
 		"Space  collect all coins",
 		"M    mute            Ctrl+Z  undo a sale",
 		"P    pin on top      C   compact / full",
+		"W    clean mode (scrub the glass)",
 	]],
 ]
 
@@ -90,6 +96,14 @@ func _ready() -> void:
 		hide()
 		tips_reset_requested.emit())
 	buttons.add_child(again)
+	var news := Button.new()
+	news.text = "What's new"
+	news.tooltip_text = "What changed in the latest versions."
+	news.focus_mode = Control.FOCUS_NONE
+	news.pressed.connect(func():
+		hide()
+		whats_new_requested.emit())
+	buttons.add_child(news)
 	var spacer := Control.new()
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	buttons.add_child(spacer)

@@ -35,6 +35,8 @@ var _eco: CheckButton
 var _tray: CheckButton
 var _autostart: CheckButton
 var _update_check: CheckButton
+var _dirt: CheckButton
+var _fish_death: CheckButton
 var _reset_button: Button
 var _reset_armed := 0.0
 var _scroll: ScrollContainer
@@ -114,6 +116,8 @@ func _ready() -> void:
 	vol.add_child(_volume_label)
 	vb.add_child(vol)
 
+	_dirt = _check(vb, "Tank gets dirty", "Grime builds up on the glass; scrub it off in clean mode (W). Off: the tank stays spotless.", "dirt")
+	_fish_death = _check(vb, "Fish can die from dirt", "A tank left fully covered starts losing fish (you can revive them with medicine). Off: the worst is losing levels.", "fish_death")
 	_eco = _check(vb, "Battery saver", "Drop to 10 FPS while you're using another window.", "eco")
 	_tray = _check(vb, "Keep running when closed", "Closing minimizes instead of quitting, so your fish keep earning. Quit from the tray icon menu.", "tray")
 	_autostart = _check(vb, "Start with Windows", "Open the tank automatically when you log in to Windows.", "autostart")
@@ -222,6 +226,9 @@ func sync(values: Dictionary) -> void:
 	_tray.set_pressed_no_signal(values.tray)
 	_autostart.set_pressed_no_signal(values.get("autostart", false))
 	_update_check.set_pressed_no_signal(values.get("update_check", true))
+	_dirt.set_pressed_no_signal(values.get("dirt", true))
+	_fish_death.set_pressed_no_signal(values.get("fish_death", true))
+	_fish_death.disabled = not values.get("dirt", true)
 	_reset_armed = 0.0
 	_reset_button.text = "Reset save..."
 
