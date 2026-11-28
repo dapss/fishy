@@ -102,6 +102,7 @@ class Fish extends RefCounted:
 	var super_cd := 0.0       # until it can get super happy again
 	var grazed: Array = []    # algae eater: spots it just finished, {p, t}, to skip for a while
 	var graze_face := 0       # algae eater: which way to face at its target (mouth to the grime)
+	var fry := false          # hatchery guppy: shark food. Takes no room, makes no coins, isn't saved
 
 
 var font: Font
@@ -135,6 +136,8 @@ var motes: Array = []     # {pos, vel}
 
 var coin_mult := 1.0
 var feeder_level := 0
+var hatchery_level := 0           # Guppy hatchery upgrade
+var _hatch_timer := 0.0
 var has_castle := false
 var transparent_outside := false   # don't paint the area around the glass
 var player_food := 0               # pellets the player dropped (read and reset by stats)
@@ -254,7 +257,11 @@ func _clamp_fish(f: Fish, p: Vector2) -> Vector2:
 
 
 func _random_spot(f: Fish) -> Vector2:
-	return _clamp_fish(f, Vector2(randf_range(1, cols - 1 - f.w), randf_range(2, sand_row() - f.h)))
+	var y := randf_range(2, sand_row() - f.h)
+	if Data.SPECIES[f.species].get("bottom", false):
+		# Glides low, just over the sand.
+		y = randf_range(sand_row() - f.h - 3.0, sand_row() - f.h)
+	return _clamp_fish(f, Vector2(randf_range(1, cols - 1 - f.w), y))
 
 
 # Trims trailing spaces from every frame, then pads all frames and the mask
@@ -383,7 +390,7 @@ func water_mult() -> float:
 func estimate_rate() -> float:
 	var r := 0.0
 	for f in fishes:
-		if f.hunger < 1.0 and not f.dead and f.weak <= 0.0:
+		if f.hunger < 1.0 and not f.dead and f.weak <= 0.0 and not f.fry:
 			r += fish_value(f) / coin_interval(f)
 	return r
 
@@ -391,7 +398,16 @@ func estimate_rate() -> float:
 func living() -> int:
 	var n := 0
 	for f in fishes:
-		if not f.dead:
+		if not f.dead and not f.fry:
+			n += 1
+	return n
+
+
+# Fish that take up room in the tank (hatchery fry don't).
+func room_used() -> int:
+	var n := 0
+	for f in fishes:
+		if not f.fry:
 			n += 1
 	return n
 
@@ -473,6 +489,8 @@ func set_weeds(n: int) -> void:
 func serialize_fish() -> Array:
 	var out := []
 	for f in fishes:
+		if f.fry:
+			continue
 		var e := {"s": f.species, "lv": f.level, "xp": f.xp, "hg": snappedf(f.hunger, 0.001), "n": f.nickname}
 		if f.sick:
 			e["sick"] = true
@@ -538,6 +556,7 @@ func _process(dt: float) -> void:
 	_update_snails(dt)
 	_update_bubbles(dt)
 	_update_feeder(dt)
+	_update_hatchery(dt)
 	_update_misc(dt)
 	_update_dirt(dt)
 	_update_hover()
@@ -576,7 +595,10 @@ func _update_fish(dt: float) -> void:
 			if f.dead:
 				_update_dead(f, dt)
 			continue
-		f.hunger = min(1.0, f.hunger + dt / Data.HUNGER_TIME)
+		if f.fry:
+			f.hunger = 0.0
+		else:
+			f.hunger = min(1.0, f.hunger + dt / Data.hunger_time(f.species))
 		f.weak = maxf(0.0, f.weak - dt)
 		var spd := f.speed * (0.5 if f.sick else 1.0)
 		f.super_time = maxf(0.0, f.super_time - dt)
@@ -695,7 +717,7 @@ func _update_fish(dt: float) -> void:
 					break
 
 		# Drop coins while not starving (and not still weak from being revived).
-		if f.hunger < 1.0 and f.weak <= 0.0:
+		if f.hunger < 1.0 and f.weak <= 0.0 and not f.fry:
 			f.coin_timer += dt
 			if f.coin_timer >= coin_interval(f):
 				f.coin_timer = 0.0
@@ -1094,6 +1116,31 @@ func _update_bubbles(dt: float) -> void:
 			bubbles.remove_at(i)
 
 
+# The hatchery lets out a guppy fry now and then while there are sharks,
+# a couple more than there are sharks at most.
+func _update_hatchery(dt: float) -> void:
+	if hatchery_level <= 0:
+		return
+	var sharks := 0
+	var fry := 0
+	for f: Fish in fishes:
+		if f.fry:
+			fry += 1
+		elif not f.dead and is_hunter(f):
+			sharks += 1
+	if sharks == 0 or fry >= sharks + 2:
+		_hatch_timer = 0.0
+		return
+	_hatch_timer += dt
+	if _hatch_timer < Data.HATCH_SECONDS / float(hatchery_level):
+		return
+	_hatch_timer = 0.0
+	var f := add_fish(Data.GUPPY, 0, 0, 0.0)
+	f.fry = true
+	f.pos = _clamp_fish(f, Vector2(randf_range(2.0, cols - 3.0), floor_y() - 1.0))
+	_popup("fry!", f.pos + Vector2(f.w * 0.5, -0.5), Color("bfe9ff"))
+
+
 func _update_feeder(dt: float) -> void:
 	if feeder_level <= 0:
 		return
@@ -1350,7 +1397,7 @@ func _update_hover() -> void:
 func _fish_at(p: Vector2) -> Fish:
 	for i in range(fishes.size() - 1, -1, -1):
 		var f: Fish = fishes[i]
-		if Rect2(f.pos - Vector2(0.3, 0.3), Vector2(f.w, f.h) + Vector2(0.6, 0.6)).has_point(p):
+		if not f.fry and Rect2(f.pos - Vector2(0.3, 0.3), Vector2(f.w, f.h) + Vector2(0.6, 0.6)).has_point(p):
 			return f
 	return null
 
@@ -1779,6 +1826,9 @@ func _draw_fish(f: Fish) -> void:
 
 	var body: Color = sp.color
 	var accent: Color = sp.get("accent", body)
+	if f.fry:
+		body = body.lightened(0.45)
+		accent = accent.lightened(0.45)
 	if f.super_time > 0.0:
 		# Super happy: colors slowly cycle through the rainbow.
 		var hue := fmod(time * 0.35 + f.phase, 1.0)

@@ -5,6 +5,17 @@ extends RefCounted
 
 const ENTRIES := [
 	{
+		"version": "0.5.0",
+		"notes": [
+			"A longer game: fishy is paced like an idle game now. The first fish still come quickly, but the later ones take hours, then days, to save up for. Each extra fish of a kind costs a bit more than the last.",
+			"Two new fish: the Betta, with long rippling fins, and the Stingray, which glides low over the sand.",
+			"The Shark is the top fish now, after the Jellyfish. One guppy keeps a shark full for longer.",
+			"New upgrade, Guppy hatchery: hatches little guppy fry for your sharks to hunt, even while the game is closed.",
+			"While you're away, a Dawa gets lonely but keeps making half its coins instead of stopping.",
+			"Keys 1-9 and 0 buy fish.",
+		],
+	},
+	{
 		"version": "0.4.3",
 		"notes": [
 			"Happiness overload takes much longer now (about 20 seconds of patting a happy Dawa), with hearts above it that fill up as you go. After a minute of super happy, it rests for 5 minutes.",

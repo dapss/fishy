@@ -95,35 +95,29 @@ const SPECIES := [
 		],
 	},
 	{
-		"name": "Angel", "icon": "><(::o>", "cost": 2000, "value": 90, "interval": 9.0, "speed": 2.5,
+		"name": "Angel", "icon": "><(::o>", "cost": 3000, "value": 90, "interval": 9.0, "speed": 2.5, "growth": 1.17,
 		"food": "pellets",
 		"color": Color("eef0f8"), "accent": Color("b79ce0"),
 		"frames": [
 			[
-				"   /|   ",
-				"  / |   ",
-				"><(::o> ",
-				"  \\ |   ",
-				"   \\|   ",
+				"  /|   ",
+				"><(::o>",
+				"  \\|   ",
 			],
 			[
-				"   /|   ",
-				"  / |   ",
-				"}-(::o> ",
-				"  \\ |   ",
-				"   \\|   ",
+				"  /|   ",
+				"}-(::o>",
+				"  \\|   ",
 			],
 		],
 		"mask": [
-			"   aa",
-			"  a a",
+			"  aa",
 			"aa dde",
-			"  a a",
-			"   aa",
+			"  aa",
 		],
 	},
 	{
-		"name": "Puffer", "icon": "><( :: o)", "cost": 10000, "value": 400, "interval": 10.0, "speed": 2.0,
+		"name": "Puffer", "icon": "><( :: o)", "cost": 1200000, "value": 1100, "interval": 10.0, "speed": 2.0, "growth": 1.21,
 		"food": "shrimp",
 		"color": Color("f9e264"), "accent": Color("e0913a"),
 		"frames": [
@@ -146,29 +140,28 @@ const SPECIES := [
 	},
 	{
 		# Sharks don't eat pellets: a hungry shark hunts guppies (not named ones).
-		"name": "Shark", "icon": ">=|||  o`-.", "cost": 60000, "value": 2200, "interval": 12.0, "speed": 4.5,
+		# A guppy keeps it full for a while: it gets hungry 3x slower than other fish.
+		"name": "Shark", "icon": ">=|||  o`-.", "cost": 12000000000, "value": 50000, "interval": 12.0, "speed": 4.5,
+		"growth": 1.27, "hunger": 360.0,
 		"prey": 0,
 		"food": "guppies",
 		"color": Color("8fa3b8"), "accent": Color("5f7389"),
 		"frames": [
 			[
-				"          /|          ",
-				"\\ _______/ |_____     ",
-				" >     |||     o `-.  ",
-				"/ `-.________.-vvv='  ",
+				"\\  ___/|___     ",
+				" >=   |||  o`-. ",
+				"/  `-.____.-vv' ",
 			],
 			[
-				"          /|          ",
-				"  _______/ |_____     ",
-				"=>     |||     o `-.  ",
-				"  `-.________.-vvv='  ",
+				"   ___/|___     ",
+				"=>=   |||  o`-. ",
+				"   `-.____.-vv' ",
 			],
 		],
 		"mask": [
-			"          dd",
-			"a        d d",
-			"aa     ddd     e",
-			"a llllllllllllllllll",
+			"a  ddddddddd",
+			"aaa   ddd  e",
+			"a  lllllllllll",
 		],
 	},
 	# Not part of the unlock chain: in the shop whenever dirt is on.
@@ -196,7 +189,7 @@ const SPECIES := [
 	# Doesn't swim, it pulses: a quick squeeze up, then a slow sink.
 	# It drifts toward food instead of chasing it.
 	{
-		"name": "Jellyfish", "icon": "(o.o)", "cost": 350000, "value": 10000, "interval": 14.0, "speed": 1.0,
+		"name": "Jellyfish", "icon": "(o.o)", "cost": 500000000, "value": 13000, "interval": 14.0, "speed": 1.0, "growth": 1.25,
 		"color": Color("e7a6ff"), "accent": Color("b07ad9"),
 		"drifter": true,
 		"food": "plankton",
@@ -216,6 +209,50 @@ const SPECIES := [
 			" ddd",
 			"le el",
 			" aaa",
+		],
+	},
+	# Long flowing fins and tail that ripple as it swims.
+	{
+		"name": "Betta", "icon": "{{(~~o>", "cost": 50000, "value": 300, "interval": 10.0, "speed": 2.8, "growth": 1.19,
+		"food": "pellets",
+		"color": Color("d6336c"), "accent": Color("5b8cff"),
+		"frames": [
+			[
+				"  ,/|/,  ",
+				"{{(~~~o> ",
+				"  `\\|\\'  ",
+			],
+			[
+				"  ,|/|,  ",
+				"}}(~~~o> ",
+				"  `|\\|'  ",
+			],
+		],
+		"mask": [
+			"  aaaaa",
+			"aa ddde",
+			"  aaaaa",
+		],
+	},
+	# Flat and wide: glides low over the sand, slowly flapping its wings.
+	{
+		"name": "Stingray", "icon": "~<_o>", "cost": 25000000, "value": 3800, "interval": 11.0, "speed": 2.2, "growth": 1.23,
+		"food": "shrimp",
+		"bottom": true,
+		"color": Color("9aa7c7"), "accent": Color("5d6b8a"),
+		"frames": [
+			[
+				"    .-\"\"-.  ",
+				"-~~<______o>",
+			],
+			[
+				"    _.--._  ",
+				"~-~<______o>",
+			],
+		],
+		"mask": [
+			"    aaaaaa",
+			"aaa       e",
 		],
 	},
 ]
@@ -254,13 +291,30 @@ static func food_of(species: int) -> String:
 
 
 # Species indexes are saved, so new species go at the end of the list.
+const GUPPY := 0
+const SHARK := 5
 const ALGAE_EATER := 6
 const JELLYFISH := 7
+const BETTA := 8
+const STINGRAY := 9
 # The order species unlock in: each one shows up once you buy the one before.
 # The algae eater isn't in it (it's in the shop whenever dirt is on).
-const CHAIN := [0, 1, 2, 3, 4, 5, 7]
-# The order of the fish buttons in the shop (and keys 1-8).
-const SHOP_ORDER := [0, 1, 2, 3, 4, 5, 7, 6]
+const CHAIN := [0, 1, 2, 3, 8, 4, 9, 7, 5]
+# The unlock order saves from before v0.5.0 counted along ("unlocked" is a
+# position in it).
+const OLD_CHAIN := [0, 1, 2, 3, 4, 5, 7]
+const CHAIN_VERSION := 2
+# The order of the fish buttons in the shop (and keys 1-9, 0).
+const SHOP_ORDER := [0, 1, 2, 3, 8, 4, 9, 7, 5, 6]
+
+# Each extra fish of a kind costs this much more than the one before.
+static func cost_growth(species: int) -> float:
+	return float(SPECIES[species].get("growth", 1.15))
+
+
+# Seconds for this kind of fish to go from full to starving.
+static func hunger_time(species: int) -> float:
+	return float(SPECIES[species].get("hunger", HUNGER_TIME))
 
 # key -> data. Cost = base * growth ^ current_level.
 const UPGRADES := {
@@ -273,15 +327,15 @@ const UPGRADES := {
 		"desc": "Drops food when fish get hungry. Each level feeds more often.",
 	},
 	"minerals": {
-		"short": "Minerals", "name": "Minerals", "base": 300, "growth": 2.2, "max": 10,
+		"short": "Minerals", "name": "Minerals", "base": 300, "growth": 4.5, "max": 10,
 		"desc": "Coins are worth x1.25 per level.",
 	},
 	"tank": {
-		"short": "Tank+", "name": "Bigger tank", "base": 150, "growth": 2.0, "max": 8,
+		"short": "Tank+", "name": "Bigger tank", "base": 150, "growth": 4.0, "max": 8,
 		"desc": "Room for 2 more fish.",
 	},
 	"weed": {
-		"short": "Weed", "name": "Seaweed )(", "base": 50, "growth": 1.6, "max": 8,
+		"short": "Weed", "name": "Seaweed )(", "base": 50, "growth": 1.9, "max": 8,
 		"desc": "Fish are happier: +5% coin value each.",
 	},
 	"castle": {
@@ -295,6 +349,10 @@ const UPGRADES := {
 	"hopper": {
 		"short": "Hopper", "name": "Food hopper", "base": 500, "growth": 3.0, "max": 3,
 		"desc": "Stores more food: 100 -> 250 -> 500 -> 1000 of each kind.",
+	},
+	"hatchery": {
+		"short": "Hatchery", "name": "Guppy hatchery", "base": 2000000000, "growth": 2.5, "max": 8,
+		"desc": "Hatches little guppy fry for your sharks to hunt. Fry don't take up room or make coins. Each level hatches them faster.",
 	},
 	"filter": {
 		"short": "Filter", "name": "Filter [=]", "base": 250, "growth": 2.5, "max": 3,
@@ -312,6 +370,9 @@ const SPONGE_POWER_PER_LV := 0.1
 const SPONGE_HOLD_PER_LV := 0.5
 
 const FEEDER_INTERVAL := [0.0, 30.0, 22.0, 15.0, 10.0, 6.0]
+# Guppy hatchery: one fry every this many seconds, divided by its level.
+const HATCH_SECONDS := 120.0
+const SHARK_MEAL_SECONDS := 180.0         # a shark eats a guppy about this often
 
 
 static func upgrade_cost(key: String, level: int) -> float:

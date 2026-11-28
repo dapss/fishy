@@ -33,7 +33,7 @@ From v0.2.0 on, fishy checks GitHub for a new version a few seconds after launch
 ## Features
 
 - Character-grid ASCII aquarium with animated swimming, blinking eyes, drifting bubbles, rising floating text, seaweed, snails, and a tiny castle.
-- Eight fish species to collect, from Guppy (`><'>`) to Jellyfish, each with its own sprite, speed, coin interval, and XP leveling up to level 5. Sharks hunt guppies instead of eating pellets, and algae eaters graze grime off the glass.
+- Ten fish species to collect, from Guppy (`><'>`) to Shark, each with its own sprite, speed, coin interval, and XP leveling up to level 5. Sharks hunt guppies instead of eating pellets, and algae eaters graze grime off the glass.
 - Desktop widget mode with borderless window, always-on-top pinning, experimental transparent background, size presets, and corner/edge snapping.
 - Compact layout with a pop-up shop and responsive font scaling so the tank stays readable in small windows down to `360x240`.
 - Code-synthesized sound effects (coins, food, splashes, level-ups, purchases, sales, pats, chomps, sponge squeaks) with volume control and one-key mute.
@@ -58,25 +58,31 @@ Spend coins in the shop on new fish and upgrades. Right-click or double-click an
 
 Keep the glass clean (see [Dirty Tanks](#dirty-tanks)).
 
-Your tank keeps earning while the game is closed, up to 12 hours per session. Without a snail, 15% of offline coins are collected before they disappear; owning at least one snail raises that to 85%.
+Your tank keeps earning while the game is closed, up to 12 hours per session. Without a snail, 15% of offline coins are collected before they disappear; owning at least one snail raises that to 85%. Nobody pats a Dawa while you're away, so it gets lonely but keeps making half its coins. Sharks eat what the Guppy hatchery hatches.
+
+fishy is paced as an idle game: the first fish come within minutes, but the later ones take hours and then days to save up for, and each extra fish of a kind costs more than the last (15% more for the cheap ones, up to 27% more for sharks).
 
 <details>
-<summary>Fish species (8)</summary>
+<summary>Fish species (10)</summary>
 
 | Species | Sprite | Cost | Base coin | Interval |
 |---|---|---:|---:|---:|
 | Guppy | `><'>` | $10 | $1 | 5s |
 | Dawa | `())==D` | $75 | $5 | 7s |
 | Classic | `><((((o>` | $400 | $22 | 8s |
-| Angel | `><(::o>` | $2,000 | $90 | 9s |
-| Puffer | `><( :: o)` | $10,000 | $400 | 10s |
-| Shark | `` >=|||  o`-. `` | $60,000 | $2,200 | 12s |
-| Jellyfish | `(o.o)` | $350,000 | $10,000 | 14s |
+| Angel | `><(::o>` | $3,000 | $90 | 9s |
+| Betta | `{{(~~~o>` | $50,000 | $300 | 10s |
+| Puffer | `><( :: o)` | $1.2M | $1,100 | 10s |
+| Stingray | `-~~<______o>` | $25M | $3,800 | 11s |
+| Jellyfish | `(o.o)` | $500M | $13,000 | 14s |
+| Shark | `` >=|||  o`-. `` | $12B | $50,000 | 12s |
 | Algae eater | `=<(##)o` | $400 | $3 | 8s |
 
 Each species unlocks once you buy the one before it. The algae eater is always in the shop while dirt is on.
 
-**Sharks** don't eat pellets: a hungry shark chases the nearest guppy and eats it, and nearby guppies try to dart away. Named guppies are never eaten. With no guppies, a shark goes hungry and stops dropping coins when starving. The auto-feeder doesn't feed sharks.
+**Sharks** don't eat pellets: a hungry shark chases the nearest guppy and eats it, and nearby guppies try to dart away. Named guppies are never eaten. A guppy keeps a shark full for about three minutes. With no guppies, a shark goes hungry and stops dropping coins when starving. The auto-feeder doesn't feed sharks, but the **Guppy hatchery** does: it hatches pale little guppy fry for them to hunt. Fry don't take up room in the tank and don't make coins.
+
+**Stingrays** glide low over the sand, slowly flapping their wings. **Bettas** trail long rippling fins.
 
 **Jellyfish** don't swim: they pulse up in quick squeezes and sink slowly in between, drifting toward food rather than chasing it.
 
@@ -89,11 +95,11 @@ Each species unlocks once you buy the one before it. The algae eater is always i
 | Food | Glyph | Eaten by | Price |
 |---|---|---|---|
 | Flakes | `*` | Guppy | Free |
-| Pellets | `•` | Classic, Angel | Packs of 20, $30 each |
-| Shrimp | `c` | Puffer | Packs of 10, $500 each |
+| Pellets | `•` | Classic, Angel, Betta | Packs of 20, $30 each |
+| Shrimp | `c` | Puffer, Stingray | Packs of 10, $500 each |
 | Plankton | `°` | Jellyfish | Packs of 10, $8,000 each |
 
-Prices grow with your coin multiplier (Minerals, Seaweed, Castle), so food stays about a fifth of what a fish earns between meals. Fish ignore food that isn't theirs. The first fish that needs a new food comes with a free pack.
+Prices grow with your coin multiplier (Minerals, Seaweed, Castle), so food stays a small share of what a fish earns between meals. Fish ignore food that isn't theirs. The first fish that needs a new food comes with a free pack.
 
 - A click drops whatever the hungriest fish nearby eats. The food bar next to the info line (or `Q`) picks a food yourself.
 - The auto-feeder drops each hungry fish's own food from your stock, also while the game is closed. When a food runs out, those fish go hungry and stop making coins (they don't die).
@@ -104,7 +110,7 @@ Prices grow with your coin multiplier (Minerals, Seaweed, Castle), so food stays
 - **Treats**, priced at two minutes of your income: Gourmet treat (double XP for 10 minutes) and Golden flakes (coins x1.5 for 5 minutes).
 
 <details>
-<summary>Upgrades (10)</summary>
+<summary>Upgrades (11)</summary>
 
 | Upgrade | Base cost | Max level | Effect |
 |---|---:|---:|---|
@@ -112,6 +118,7 @@ Prices grow with your coin multiplier (Minerals, Seaweed, Castle), so food stays
 | Auto-feeder | $200 | 5 | Drops food when fish get hungry, faster each level |
 | Minerals | $300 | 10 | Multiplies coin value by x1.25 per level |
 | Bigger tank | $150 | 8 | Adds room for 2 more fish per level |
+| Guppy hatchery | $2B | 8 | Hatches guppy fry for your sharks, faster each level (shows up once you discover the Shark) |
 | Seaweed `)(` | $50 | 8 | +5% coin value per plant |
 | Castle `[~]` | $5,000 | 1 | +25% coin value |
 | Big sponge | $150 | 3 | +20% reach, +10% scrubbing strength and +50% grime held per level |
@@ -175,7 +182,7 @@ Optional settings for running all day:
 
 | Key | Action |
 |---|---|
-| `1` to `8` | Buy fish (hold `Shift` to buy max) |
+| `1` to `9`, `0` | Buy fish (hold `Shift` to buy max) |
 | `F` | Feed every hungry fish |
 | `W` | Clean mode on / off |
 | `Q` | What a click drops: auto, or a food |
