@@ -5,6 +5,13 @@ extends RefCounted
 
 const ENTRIES := [
 	{
+		"version": "0.5.1",
+		"notes": [
+			"Fixed: a shop tab could open scrolled down and look empty. Every tab now opens at the top.",
+			"Maxed upgrades stay listed on the \"Maxed\" line instead of disappearing.",
+		],
+	},
+	{
 		"version": "0.5.0",
 		"notes": [
 			"A longer game: fishy is paced like an idle game now. The first fish still come quickly, but the later ones take hours, then days, to save up for. Each extra fish of a kind costs a bit more than the last.",
