@@ -31,6 +31,7 @@ const SECTIONS := [
 	["KEYS", [
 		"Esc  settings        F1  this help",
 		"S    shop            L   fish list",
+		"Tab  next shop tab (Fish, Food, Upgrades, Pearls)",
 		"O    pearls and moving to a new tank",
 		"1-0  buy fish        F   feed every hungry fish",
 		"Q    what clicks drop (auto / a food)",

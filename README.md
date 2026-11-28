@@ -54,7 +54,7 @@ Over time, fish get hungry and show a `?` above them. Click anywhere in the wate
 
 Each fish eats only its own food (see [Food](#food)).
 
-Spend coins in the shop on new fish and upgrades. Right-click or double-click any fish to name it, check its stats, or sell it (you have 8 seconds to undo a sale with `Ctrl+Z`).
+Spend coins in the shop on new fish and upgrades. The shop has tabs for Fish, Food, Upgrades and Pearls (`Tab` switches); a dot marks any tab with something you can afford. Right-click or double-click any fish to name it, check its stats, or sell it (you have 8 seconds to undo a sale with `Ctrl+Z`).
 
 Keep the glass clean (see [Dirty Tanks](#dirty-tanks)).
 
@@ -140,7 +140,7 @@ Filter and UV lamp together slow grime by at most 50%. **Fish Medicine** is a co
 
 ## Pearls and New Tanks
 
-Once a tank has earned $1B, you can **move to a new tank** (press `O`, or the Pearls button in the shop). You start over with a guppy and a bit of money, and get **pearls**: the square root of what the tank earned, in billions (so $1B gives 1 pearl, $100B gives 10, $1T gives 31). The Pearl diver upgrade adds 10% per level. Your first move counts everything you earned before pearls existed.
+Once a tank has earned $1B, you can **move to a new tank** (press `O`, or the Pearls tab in the shop). You start over with a guppy and a bit of money, and get **pearls**: the square root of what the tank earned, in billions (so $1B gives 1 pearl, $100B gives 10, $1T gives 31). The Pearl diver upgrade adds 10% per level. Your first move counts everything you earned before pearls existed.
 
 New tanks also bring new fish: the Seahorse after your 1st move, the Octopus after your 3rd and the Anglerfish after your 6th.
 
@@ -216,6 +216,7 @@ Optional settings for running all day:
 | `Q` | What a click drops: auto, or a food |
 | `Space` | Collect all coins |
 | `L` | Open fish list |
+| `Tab` | Next shop tab (Fish, Food, Upgrades, Pearls) |
 | `O` | Pearls and moving to a new tank |
 | `S` | Toggle shop pop-up (compact layout) |
 | `C` | Toggle compact / full layout |

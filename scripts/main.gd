@@ -103,6 +103,25 @@ var help_button: Button
 var fish_list
 var fish_list_button: Button
 var fish_section_label: Label
+# Shop tabs: one section of the shop shows at a time.
+const SHOP_TABS := ["fish", "food", "upgrades", "pearls"]
+const TAB_NAMES := {"fish": "Fish", "food": "Food", "upgrades": "Upgrades", "pearls": "Pearls"}
+const UPGRADE_GROUPS := [
+	["Income", ["minerals", "weed", "castle", "reef"]],
+	["Care", ["snail", "feeder", "hopper", "hatchery"]],
+	["Tank", ["tank", "sponge", "filter", "uv"]],
+]
+var shop_tab := "fish"
+var tab_buttons := {}
+var shop_sections := {}
+var upgrade_groups: Array = []    # [label, flow] per group
+var maxed_label: Label
+var tank_full_label: Label
+var pearl_info_label: Label
+var shop_full_scroll: ScrollContainer   # holds the shop in the full layout (height capped)
+var _tab_on: StyleBoxFlat
+var _shop_h := -1.0               # shop height last fitted (refit when it changes)
+var _tab_on_tight: StyleBoxFlat
 var tip_box: PanelContainer
 var tip_label: Label
 var tray: StatusIndicator
@@ -286,6 +305,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		_toggle_fish_list()
 	elif k == KEY_O:
 		_toggle_pearls()
+	elif k == KEY_TAB:
+		_next_shop_tab()
 	elif k == KEY_P:
 		_set_setting("on_top", not settings.values.on_top)
 		_say("Pinned on top." if settings.values.on_top else "Unpinned.")
@@ -1027,6 +1048,16 @@ func _build_theme() -> Theme:
 		tight.content_margin_top = 2
 		tight.content_margin_bottom = 2
 		_compact_btn[state] = tight
+	# The open shop tab.
+	_tab_on = normal.duplicate() as StyleBoxFlat
+	_tab_on.bg_color = Color("16324a")
+	_tab_on.border_color = Color("5fb3d9")
+	_tab_on.border_width_bottom = 2
+	_tab_on_tight = _tab_on.duplicate() as StyleBoxFlat
+	_tab_on_tight.content_margin_left = 5
+	_tab_on_tight.content_margin_right = 5
+	_tab_on_tight.content_margin_top = 2
+	_tab_on_tight.content_margin_bottom = 2
 	return th
 
 
@@ -1146,42 +1177,58 @@ func _build_ui() -> void:
 	clean_button.tooltip_text = "Clean mode (W): hold left and scrub the glass.\nSlow strokes clean best. Right-click rinses the sponge."
 	info_row.add_child(clean_button)
 
-	# Shop.
+	# Shop: a row of tabs, and one section at a time under it.
 	shop_box = VBoxContainer.new()
 	shop_box.add_theme_constant_override("separation", 6)
 	# Fill the pop-up's width so the flow rows put several buttons side by side.
 	shop_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	main_vb.add_child(shop_box)
-	# A flow container, so the button drops under the label in narrow windows.
-	var fish_head := HFlowContainer.new()
-	fish_head.add_theme_constant_override("h_separation", 6)
-	fish_head.add_theme_constant_override("v_separation", 4)
-	fish_section_label = _section_label("FISH  (keys 1-9 and 0, Shift = buy max)")
-	fish_section_label.tooltip_text = "Keys 1-9 and 0 buy fish. Hold Shift to buy as many as you can afford."
-	fish_section_label.mouse_filter = Control.MOUSE_FILTER_PASS
+	shop_full_scroll = ScrollContainer.new()
+	shop_full_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	main_vb.add_child(shop_full_scroll)
+	shop_full_scroll.add_child(shop_box)
+	# A flow container, so the list button drops under the tabs in narrow windows.
+	var tab_row := HFlowContainer.new()
+	tab_row.add_theme_constant_override("h_separation", 4)
+	tab_row.add_theme_constant_override("v_separation", 4)
+	shop_box.add_child(tab_row)
+	for t in SHOP_TABS:
+		var b := _make_button("", _set_shop_tab.bind(t))
+		b.tooltip_text = "Tab: next shop tab"
+		tab_row.add_child(b)
+		tab_buttons[t] = b
+
+	# Fish
+	var fish_sec := VBoxContainer.new()
+	fish_sec.add_theme_constant_override("separation", 6)
+	shop_box.add_child(fish_sec)
+	shop_sections.fish = fish_sec
+	var fish_head := HBoxContainer.new()
+	fish_sec.add_child(fish_head)
+	fish_section_label = _hint_label("Keys 1-9 and 0 buy fish. Shift = buy as many as you can.")
+	fish_section_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	fish_head.add_child(fish_section_label)
-	var head_space := Control.new()
-	head_space.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	fish_head.add_child(head_space)
 	fish_list_button = _make_button("Fish list (L)", _toggle_fish_list)
 	fish_list_button.tooltip_text = "Every fish in your tank, with level and hunger."
 	fish_head.add_child(fish_list_button)
-	shop_box.add_child(fish_head)
-	var fish_flow := HFlowContainer.new()
-	fish_flow.add_theme_constant_override("h_separation", 6)
-	fish_flow.add_theme_constant_override("v_separation", 6)
-	shop_box.add_child(fish_flow)
+	tank_full_label = _hint_label("")
+	tank_full_label.add_theme_color_override("font_color", Color("d9a35f"))
+	fish_sec.add_child(tank_full_label)
+	var fish_flow := _shop_flow()
+	fish_sec.add_child(fish_flow)
 	for i in Data.SHOP_ORDER:
 		var b := _make_button("", _buy_fish.bind(i))
 		fish_flow.add_child(b)
 		fish_buttons.append(b)
 
-	food_label = _section_label("FOOD  (each fish eats only its own)")
-	shop_box.add_child(food_label)
-	food_flow = HFlowContainer.new()
-	food_flow.add_theme_constant_override("h_separation", 6)
-	food_flow.add_theme_constant_override("v_separation", 6)
-	shop_box.add_child(food_flow)
+	# Food
+	var food_sec := VBoxContainer.new()
+	food_sec.add_theme_constant_override("separation", 6)
+	shop_box.add_child(food_sec)
+	shop_sections.food = food_sec
+	food_label = _hint_label("Each fish eats only its own food. Treats help every fish.")
+	food_sec.add_child(food_label)
+	food_flow = _shop_flow()
+	food_sec.add_child(food_flow)
 	for k in Data.PAID_FOODS:
 		var b := _make_button("", _buy_food.bind(k))
 		food_flow.add_child(b)
@@ -1191,19 +1238,48 @@ func _build_ui() -> void:
 		food_flow.add_child(b)
 		treat_buttons[t] = b
 
-	shop_box.add_child(_section_label("UPGRADES"))
-	var up_flow := HFlowContainer.new()
-	up_flow.add_theme_constant_override("h_separation", 6)
-	up_flow.add_theme_constant_override("v_separation", 6)
-	shop_box.add_child(up_flow)
-	for key in Data.UPGRADES:
-		var b := _make_button("", _buy_upgrade.bind(key))
-		up_flow.add_child(b)
-		upgrade_buttons[key] = b
+	# Upgrades, in small groups.
+	var up_sec := VBoxContainer.new()
+	up_sec.add_theme_constant_override("separation", 4)
+	shop_box.add_child(up_sec)
+	shop_sections.upgrades = up_sec
 	medicine_button = _make_button("", _buy_medicine)
-	up_flow.add_child(medicine_button)
+	for g in UPGRADE_GROUPS:
+		var gl := _hint_label(String(g[0]))
+		gl.add_theme_color_override("font_color", Color("5f8fae"))
+		up_sec.add_child(gl)
+		var flow := _shop_flow()
+		up_sec.add_child(flow)
+		upgrade_groups.append([gl, flow])
+		for key in g[1]:
+			var b := _make_button("", _buy_upgrade.bind(key))
+			flow.add_child(b)
+			upgrade_buttons[key] = b
+		if g[0] == "Care":
+			flow.add_child(medicine_button)
+	maxed_label = _hint_label("")
+	up_sec.add_child(maxed_label)
+
+	# Pearls
+	var pearl_sec := VBoxContainer.new()
+	pearl_sec.add_theme_constant_override("separation", 6)
+	shop_box.add_child(pearl_sec)
+	shop_sections.pearls = pearl_sec
+	pearl_info_label = _hint_label("")
+	pearl_info_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	pearl_info_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	pearl_sec.add_child(pearl_info_label)
+	var pearl_flow := _shop_flow()
+	pearl_sec.add_child(pearl_flow)
 	pearl_button = _make_button("", _toggle_pearls)
-	up_flow.add_child(pearl_button)
+	pearl_flow.add_child(pearl_button)
+	for key in Data.UPGRADES:
+		if not upgrade_buttons.has(key):
+			# Upgrades that belong with pearls (Pearl diver).
+			var b := _make_button("", _buy_upgrade.bind(key))
+			pearl_flow.add_child(b)
+			upgrade_buttons[key] = b
+	_show_shop_tab()
 
 	# Shop pop-up used in compact mode: covers the bottom of the tank.
 	shop_popup = PanelContainer.new()
@@ -1311,6 +1387,97 @@ func _make_button(text: String, cb: Callable) -> Button:
 	b.focus_mode = Control.FOCUS_NONE
 	b.pressed.connect(cb)
 	return b
+
+
+# A dim one-line note inside a shop tab.
+func _hint_label(text: String) -> Label:
+	var l := Label.new()
+	l.text = text
+	l.add_theme_color_override("font_color", Color("3a6b8a"))
+	l.mouse_filter = Control.MOUSE_FILTER_PASS
+	l.clip_text = true
+	l.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	_floating_labels.append(l)
+	return l
+
+
+func _shop_flow() -> HFlowContainer:
+	var flow := HFlowContainer.new()
+	flow.add_theme_constant_override("h_separation", 6)
+	flow.add_theme_constant_override("v_separation", 6)
+	return flow
+
+
+func _tab_shown(t: String) -> bool:
+	match t:
+		"food":
+			return not food_seen.is_empty()
+		"pearls":
+			return _pearls_known()
+	return true
+
+
+func _set_shop_tab(t: String) -> void:
+	shop_tab = t
+	_show_shop_tab()
+	_refresh()
+	# After the new tab has laid out, so its height is known.
+	_fit_popups.call_deferred()
+
+
+# Tab key: the next tab that's showing.
+func _next_shop_tab() -> void:
+	var i := SHOP_TABS.find(shop_tab)
+	for n in range(1, SHOP_TABS.size() + 1):
+		var t: String = SHOP_TABS[(i + n) % SHOP_TABS.size()]
+		if _tab_shown(t):
+			_set_shop_tab(t)
+			return
+
+
+func _show_shop_tab() -> void:
+	if not _tab_shown(shop_tab):
+		shop_tab = "fish"
+	for t in SHOP_TABS:
+		shop_sections[t].visible = t == shop_tab
+
+
+# Tab labels, with a dot when something in that tab is affordable.
+func _refresh_tabs() -> void:
+	_show_shop_tab()
+	var h := shop_box.get_combined_minimum_size().y
+	if h != _shop_h:
+		_shop_h = h
+		_fit_popups.call_deferred()
+	for t in SHOP_TABS:
+		var b: Button = tab_buttons[t]
+		b.visible = _tab_shown(t)
+		var dot := _section_has_buy(shop_sections[t])
+		var label: String = TAB_NAMES[t]
+		if compact and t == "upgrades":
+			label = "Upgr"
+		if t == "pearls":
+			label += " %d" % pearls
+		b.text = label + (" \u2022" if dot else "")
+		var on: bool = t == shop_tab
+		for state in ["normal", "hover", "pressed"]:
+			if on:
+				b.add_theme_stylebox_override(state, _tab_on_tight if compact else _tab_on)
+			elif compact:
+				b.add_theme_stylebox_override(state, _compact_btn.get(state, _compact_btn.normal))
+			else:
+				b.remove_theme_stylebox_override(state)
+		b.add_theme_color_override("font_color", Color("e8f4ff") if on else (Color("b8ffd6") if dot else Color("6f97b3")))
+
+
+func _section_has_buy(node: Node) -> bool:
+	for c in node.get_children():
+		if c is Button:
+			if c.visible and not c.disabled and c != pearl_button and c != fish_list_button:
+				return true
+		elif c is Control and c.visible and _section_has_buy(c):
+			return true
+	return false
 
 
 func _section_label(text: String) -> Label:
@@ -1534,8 +1701,9 @@ func _update_layout() -> void:
 	if compact:
 		shop_scroll.add_child(shop_box)
 	else:
-		main_vb.add_child(shop_box)
+		shop_full_scroll.add_child(shop_box)
 		shop_popup.visible = false
+	shop_full_scroll.visible = not compact
 
 
 # Small windows: tighter margins and buttons, smaller status text.
@@ -1547,8 +1715,8 @@ func _style_for_size(small: bool, scale: float) -> void:
 	settings_button.text = "[=]" if small else "[ = ]"
 	help_button.text = "[?]" if small else "[ ? ]"
 	undo_button.text = "[undo]" if small else "[ undo sell ]"
-	fish_section_label.text = "-- FISH --" if small else "-- FISH  (keys 1-9 and 0, Shift = buy max) --"
-	food_label.text = "-- FOOD --" if small else "-- FOOD  (each fish eats only its own) --"
+	fish_section_label.visible = not small
+	food_label.visible = not small
 	fish_list_button.text = "List (L)" if small else "Fish list (L)"
 	for b in [shop_button, pin_button, help_button, settings_button, min_button, close_button, undo_button]:
 		for state in _compact_btn:
@@ -1564,7 +1732,7 @@ func _style_for_size(small: bool, scale: float) -> void:
 			l.remove_theme_font_size_override("font_size")
 	info_label.custom_minimum_size.y = 16 if small else 20
 	var shop_buttons: Array = fish_buttons + upgrade_buttons.values() + food_buttons.values() + treat_buttons.values() \
-		+ [medicine_button, fish_list_button, food_button]
+		+ [medicine_button, fish_list_button, food_button, pearl_button] + tab_buttons.values()
 	for b in shop_buttons:
 		for state in _compact_btn:
 			if small:
@@ -1582,6 +1750,9 @@ func _fit_popups() -> void:
 	var pad: float = shop_popup.get_theme_stylebox("panel").get_minimum_size().y
 	var room := maxf(60.0, size.y - top - pad - 16.0)
 	shop_scroll.custom_minimum_size.y = minf(shop_box.get_combined_minimum_size().y, room)
+	# Full layout: the shop never takes more than about 45% of the window,
+	# so the tank always keeps the bigger part.
+	shop_full_scroll.custom_minimum_size.y = minf(shop_box.get_combined_minimum_size().y, maxf(80.0, size.y * 0.45))
 	info_card.max_width = size.x - 40.0
 	update_card.max_width = size.x - 40.0
 	fish_card.max_width = size.x - 40.0
@@ -2007,6 +2178,8 @@ func _refresh_shop(rate: float) -> void:
 				continue
 		# The pop-up shop uses short labels so 2-3 buttons fit per row;
 		# the tooltip has the full details.
+		if pos >= 0:
+			b.visible = pos <= unlocked + 1    # only the next fish to discover shows as ???
 		if pos > unlocked:
 			b.text = ("??? $" if compact else "???  $") + Data.fmt(cost)
 			b.tooltip_text = "Buy the previous fish to discover this one."
@@ -2048,9 +2221,30 @@ func _refresh_shop(rate: float) -> void:
 	upgrade_buttons.diver.visible = _pearls_known()
 	pearl_button.visible = _pearls_known()
 	var gain := Data.pearls_for(run_earned, upgrades.diver)
-	pearl_button.text = ("Pearls %d" if compact else "Pearls (O)  %d") % pearls + (("  +%d" % gain) if gain > 0 else "")
+	pearl_button.text = "Open pearls (O)"
 	pearl_button.tooltip_text = "Spend pearls on perks that last forever, or move to a new tank for more pearls."
-	_mark_affordable(pearl_button)
+	pearl_button.disabled = false
+	pearl_info_label.text = ("%d pearls. Moving now: +%d." % [pearls, gain]) if gain > 0 else (
+		"%d pearls. First pearl at $%s earned in this tank." % [pearls, Data.fmt(Data.next_pearl_at(run_earned))])
+	# Maxed upgrades step aside into one line.
+	var maxed := []
+	for key in upgrade_buttons:
+		var b: Button = upgrade_buttons[key]
+		if b.visible and upgrades[key] >= int(Data.UPGRADES[key].max):
+			b.visible = false
+			maxed.append(String(Data.UPGRADES[key].short))
+	maxed_label.text = "Maxed: " + ", ".join(maxed)
+	maxed_label.visible = not maxed.is_empty()
+	for g in upgrade_groups:
+		var any := false
+		for c in g[1].get_children():
+			any = any or c.visible
+		g[0].visible = any
+		g[1].visible = any
+	var room: int = tank.room_used()
+	tank_full_label.text = ("Full (%d/%d): sell a fish or get Tank+" if compact else "The tank is full (%d/%d): sell a fish, or buy a Bigger tank in Upgrades.") % [room, capacity()]
+	tank_full_label.visible = room >= capacity()
+	_refresh_tabs()
 	medicine_button.visible = settings.values.dirt
 
 
@@ -2088,7 +2282,6 @@ func _refresh_food() -> void:
 				"\nActive: %s left." % Data.fmt_time(tank.golden_time) if tank.golden_time > 0.0 else ""]
 		b.disabled = money < tp
 		_mark_affordable(b)
-	food_label.visible = any
 	food_flow.visible = any
 	# The food bar: what a click drops, and what's in stock.
 	food_button.visible = any

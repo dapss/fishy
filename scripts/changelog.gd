@@ -15,6 +15,7 @@ const ENTRIES := [
 			"Keys 1-9 and 0 buy fish.",
 			"Pearls: once a tank has earned $1B, move to a new tank (O) for pearls, and spend them on perks that last forever. A named small fish can come along.",
 			"New upgrades: Coral reef (+10% coins per level, keeps going) and Pearl diver (more pearls when you move).",
+			"A tidier shop: tabs for Fish, Food, Upgrades and Pearls (Tab switches), upgrades in groups, maxed ones out of the way, and a dot on any tab with something you can afford.",
 			"Three fish only for tanks you've moved to: the Seahorse (1st move), the Octopus (3rd) and the Anglerfish (6th), with a new food, krill.",
 		],
 	},
