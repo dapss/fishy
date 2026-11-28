@@ -255,6 +255,76 @@ const SPECIES := [
 			"aaa       e",
 		],
 	},
+	# Prestige fish: only in the shop after moving to a new tank a few times.
+	# Bobs along upright, swaying its curled tail.
+	{
+		"name": "Seahorse", "icon": "(o>=", "cost": 300000000000, "value": 180000, "interval": 12.0, "speed": 1.6, "growth": 1.27,
+		"food": "krill", "needs_moves": 1, "upright": true,
+		"color": Color("f2c94c"), "accent": Color("e0913a"),
+		"frames": [
+			[
+				" (o>=",
+				"  )\\",
+				"  @/",
+			],
+			[
+				" (o>=",
+				"  )\\",
+				"  @|",
+			],
+		],
+		"mask": [
+			" de a",
+			"   a",
+			"  aa",
+		],
+	},
+	# Crawls over the sand and slowly shifts color.
+	{
+		"name": "Octopus", "icon": "(o  o)", "cost": 8000000000000, "value": 700000, "interval": 13.0, "speed": 1.8, "growth": 1.28,
+		"food": "krill", "needs_moves": 3, "bottom": true, "shift": true,
+		"color": Color("ff7f6e"), "accent": Color("e0565a"),
+		"frames": [
+			[
+				" .--. ",
+				"(o  o)",
+				"/\\/\\/\\",
+			],
+			[
+				" .--. ",
+				"(o  o)",
+				"\\/\\/\\/",
+			],
+		],
+		"mask": [
+			" dddd",
+			" e  e",
+			"aaaaaa",
+		],
+	},
+	# Lives in the deep: the lure on its head glows and pulses.
+	{
+		"name": "Anglerfish", "icon": "><( O|vv", "cost": 200000000000000, "value": 2800000, "interval": 14.0, "speed": 2.0, "growth": 1.3,
+		"food": "krill", "needs_moves": 6,
+		"color": Color("5a6b8c"), "accent": Color("3a4866"), "glow": Color("fff27a"),
+		"frames": [
+			[
+				"      _*",
+				"><(  O |vv",
+				"   `--'^^",
+			],
+			[
+				"      _*",
+				"}-(  O |vv",
+				"   `--'^^",
+			],
+		],
+		"mask": [
+			"      dg",
+			"aad  e  ll",
+			"   ddddll",
+		],
+	},
 ]
 
 # Food you drop in the water. Every fish eats only its own kind (the
@@ -267,8 +337,9 @@ const FOODS := {
 	"pellets": {"name": "Pellets", "glyph": "\u2022", "color": Color("d6b27a"), "price": 30.0, "pack": 20, "sink": 1.8},
 	"shrimp": {"name": "Shrimp", "glyph": "c", "color": Color("ff8f7a"), "price": 500.0, "pack": 10, "sink": 1.4},
 	"plankton": {"name": "Plankton", "glyph": "\u00b0", "color": Color("9ff0d0"), "price": 8000.0, "pack": 10, "sink": 0.5},
+	"krill": {"name": "Krill", "glyph": "~", "color": Color("ff9ec4"), "price": 150000.0, "pack": 10, "sink": 1.2},
 }
-const PAID_FOODS := ["pellets", "shrimp", "plankton"]
+const PAID_FOODS := ["pellets", "shrimp", "plankton", "krill"]
 const FOOD_CAP := [100, 250, 500, 1000]   # pieces of each food you can store, by Food hopper level
 const MEAL_SECONDS := 60.0                # a fed fish eats about this often
 # Patting the Dawa: stroke this many cells over it for one pat.
@@ -297,15 +368,24 @@ const ALGAE_EATER := 6
 const JELLYFISH := 7
 const BETTA := 8
 const STINGRAY := 9
+const SEAHORSE := 10
+const OCTOPUS := 11
+const ANGLERFISH := 12
 # The order species unlock in: each one shows up once you buy the one before.
 # The algae eater isn't in it (it's in the shop whenever dirt is on).
-const CHAIN := [0, 1, 2, 3, 8, 4, 9, 7, 5]
+# The last ones only show up after moving to a new tank (their "needs_moves").
+const CHAIN := [0, 1, 2, 3, 8, 4, 9, 7, 5, 10, 11, 12]
 # The unlock order saves from before v0.5.0 counted along ("unlocked" is a
 # position in it).
 const OLD_CHAIN := [0, 1, 2, 3, 4, 5, 7]
 const CHAIN_VERSION := 2
 # The order of the fish buttons in the shop (and keys 1-9, 0).
-const SHOP_ORDER := [0, 1, 2, 3, 8, 4, 9, 7, 5, 6]
+const SHOP_ORDER := [0, 1, 2, 3, 8, 4, 9, 7, 5, 6, 10, 11, 12]
+
+
+# Moves to a new tank it takes before this fish is sold at all.
+static func needs_moves(species: int) -> int:
+	return int(SPECIES[species].get("needs_moves", 0))
 
 # Each extra fish of a kind costs this much more than the one before.
 static func cost_growth(species: int) -> float:
@@ -354,6 +434,14 @@ const UPGRADES := {
 		"short": "Hatchery", "name": "Guppy hatchery", "base": 2000000000, "growth": 2.5, "max": 8,
 		"desc": "Hatches little guppy fry for your sharks to hunt. Fry don't take up room or make coins. Each level hatches them faster.",
 	},
+	"reef": {
+		"short": "Reef", "name": "Coral reef", "base": 1000000, "growth": 1.6, "max": 60,
+		"desc": "Coral grows on the sand: +10% coin value per level. Keeps going long after the rest is maxed.",
+	},
+	"diver": {
+		"short": "Diver", "name": "Pearl diver", "base": 100000000, "growth": 2.5, "max": 40,
+		"desc": "+10% pearls when you move to a new tank, per level.",
+	},
 	"filter": {
 		"short": "Filter", "name": "Filter [=]", "base": 250, "growth": 2.5, "max": 3,
 		"desc": "The tank gets dirty 12% slower per level.",
@@ -373,6 +461,58 @@ const FEEDER_INTERVAL := [0.0, 30.0, 22.0, 15.0, 10.0, 6.0]
 # Guppy hatchery: one fry every this many seconds, divided by its level.
 const HATCH_SECONDS := 120.0
 const SHARK_MEAL_SECONDS := 180.0         # a shark eats a guppy about this often
+
+# ---------------------------------------------------------------- prestige
+# Moving to a new tank: you give up this tank (coins, fish, upgrades) for
+# pearls, which buy perks that last forever.
+# pearls = floor(sqrt(coins earned this run / PEARL_UNIT)) * (1 + 10% per Pearl diver)
+const PEARL_UNIT := 1000000000.0
+# Only small fish fit in the travel bag (keeps a new tank from starting
+# with a shark in it).
+const KEEPABLE := [0, 1, 2, 3]
+
+# key -> data. "costs" lists the price of each level in pearls; with "step"
+# instead, a level costs base + step * level and it goes up to "max".
+const PERKS := {
+	"lucky": {"name": "Lucky water", "base": 2, "step": 2, "max": 50,
+		"desc": "+25% coin value per level, in every tank from now on."},
+	"start": {"name": "Head start", "costs": [2, 5, 10, 20],
+		"desc": "Start each new tank with more money."},
+	"learn": {"name": "Quick learners", "costs": [3, 6, 9, 12],
+		"desc": "Fish level up 25% faster per level."},
+	"friends": {"name": "Old friends", "costs": [3, 6, 12, 24],
+		"desc": "Bring one more named fish along when you move."},
+	"room": {"name": "Roomy tank", "costs": [5, 10, 20, 40],
+		"desc": "Room for 2 more fish, in every tank."},
+	"habits": {"name": "Old habits", "costs": [3, 6, 12],
+		"desc": "New tanks start with a Snail and the Auto-feeder at this level."},
+	"pantry": {"name": "Pantry", "costs": [4],
+		"desc": "Keep your food stock when you move."},
+}
+const PERK_ORDER := ["lucky", "start", "learn", "friends", "room", "habits", "pantry"]
+const HEAD_START := [0.0, 500.0, 20000.0, 2000000.0, 200000000.0]
+
+
+static func perk_max(key: String) -> int:
+	var p: Dictionary = PERKS[key]
+	return p.costs.size() if p.has("costs") else int(p.max)
+
+
+static func perk_cost(key: String, level: int) -> int:
+	var p: Dictionary = PERKS[key]
+	if p.has("costs"):
+		return int(p.costs[mini(level, p.costs.size() - 1)])
+	return int(p.base) + int(p.step) * level
+
+
+static func pearls_for(earned: float, diver: int) -> int:
+	return int(floor(floor(sqrt(maxf(0.0, earned) / PEARL_UNIT)) * (1.0 + 0.1 * diver)))
+
+
+# Coins needed this run for the next pearl (before Pearl diver).
+static func next_pearl_at(earned: float) -> float:
+	var n: float = floor(sqrt(maxf(0.0, earned) / PEARL_UNIT)) + 1.0
+	return n * n * PEARL_UNIT
 
 
 static func upgrade_cost(key: String, level: int) -> float:

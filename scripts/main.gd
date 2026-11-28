@@ -11,6 +11,7 @@ const FishCard = preload("res://scripts/fish_card.gd")
 const InfoCard = preload("res://scripts/info_card.gd")
 const HelpCard = preload("res://scripts/help_card.gd")
 const FishList = preload("res://scripts/fish_list.gd")
+const PearlCard = preload("res://scripts/pearl_card.gd")
 const Updater = preload("res://scripts/updater.gd")
 const UpdateCard = preload("res://scripts/update_card.gd")
 const Changelog = preload("res://scripts/changelog.gd")
@@ -42,6 +43,13 @@ const MAX_MEDICINE := 99
 var money := Data.START_MONEY
 var lifetime := 0.0
 var unlocked := 1                 # how far along Data.CHAIN the shop shows
+# Prestige: moving to a new tank trades this run for pearls; perks last forever.
+var pearls := 0
+var perks := {}
+var moves := 0
+var run_earned := 0.0             # coins earned in this tank (pearls come from this)
+var pearl_card
+var pearl_button: Button
 var upgrades := {}
 var tips_seen := {}
 var stats := {}
@@ -130,6 +138,8 @@ func _ready() -> void:
 	get_tree().set_auto_accept_quit(false)   # closing may hide to the tray instead
 	for k in Data.UPGRADES:
 		upgrades[k] = 0
+	for k in Data.PERK_ORDER:
+		perks[k] = 0
 	settings.load_file()
 	settings.values.autostart = _autostart_enabled()
 	stats = _default_stats()
@@ -239,6 +249,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			help_card.hide()
 		elif fish_list.visible:
 			fish_list.hide()
+		elif pearl_card.visible:
+			pearl_card.hide()
 		elif fish_card.visible:
 			fish_card.close()
 		elif info_card.visible:
@@ -249,7 +261,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			_toggle_settings()
 	elif k == KEY_F1 or event.unicode == 63:      # F1 or "?"
 		_toggle_help()
-	elif settings_panel.visible or fish_card.visible or info_card.visible or help_card.visible or fish_list.visible or update_card.visible:
+	elif settings_panel.visible or fish_card.visible or info_card.visible or help_card.visible or fish_list.visible or update_card.visible or pearl_card.visible:
 		handled = false
 	elif k == KEY_Z and event.ctrl_pressed:
 		_undo_sell()
@@ -272,6 +284,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		_toggle_mute()
 	elif k == KEY_L:
 		_toggle_fish_list()
+	elif k == KEY_O:
+		_toggle_pearls()
 	elif k == KEY_P:
 		_set_setting("on_top", not settings.values.on_top)
 		_say("Pinned on top." if settings.values.on_top else "Unpinned.")
@@ -421,11 +435,12 @@ func _toggle_mute() -> void:
 # ---------------------------------------------------------------- economy
 
 func capacity() -> int:
-	return 6 + 2 * int(upgrades.tank)
+	return 6 + 2 * int(upgrades.tank) + 2 * int(perks.get("room", 0))
 
 
 func coin_mult(ups := upgrades) -> float:
-	return pow(1.25, ups.minerals) * (1.0 + 0.05 * ups.weed + 0.25 * ups.castle)
+	return pow(1.25, ups.minerals) * (1.0 + 0.05 * ups.weed + 0.25 * ups.castle) \
+		* (1.0 + 0.1 * ups.reef) * (1.0 + 0.25 * int(perks.get("lucky", 0)))
 
 
 func owned(species: int) -> int:
@@ -458,6 +473,7 @@ func _apply_upgrades() -> void:
 	tank.dirt_rate_mult = 1.0 - Data.dirt_slowdown(upgrades)
 	tank.sponge_level = upgrades.sponge
 	tank.hatchery_level = upgrades.hatchery
+	tank.learn_level = int(perks.get("learn", 0))
 
 
 # Hold Shift to buy as many as you can afford (and have room for).
@@ -467,6 +483,9 @@ func _buy_fish(i: int) -> void:
 	var pos := Data.CHAIN.find(i)
 	var chain := pos >= 0
 	if (chain and pos > unlocked) or (not chain and not settings.values.dirt):
+		return
+	if moves < Data.needs_moves(i):
+		_say("The %s only comes to tanks you've moved to %d times (O)." % [Data.SPECIES[i].name, Data.needs_moves(i)])
 		return
 	var many := Input.is_key_pressed(KEY_SHIFT)
 	var n := 0
@@ -563,6 +582,163 @@ func _flush_fish(f) -> void:
 	_refresh()
 
 
+# ---------------------------------------------------------------- pearls
+
+# Moves needed for the next prestige fish you don't have yet (0: none left).
+func _next_prestige_fish_moves() -> int:
+	var best := 0
+	for i in Data.SPECIES.size():
+		var n := Data.needs_moves(i)
+		if n > moves and (best == 0 or n < best):
+			best = n
+	return best
+
+
+# The pearl button shows up once a move is worth thinking about.
+func _pearls_known() -> bool:
+	return moves > 0 or pearls > 0 or run_earned >= Data.PEARL_UNIT * 0.25
+
+
+func _toggle_pearls() -> void:
+	if not _pearls_known():
+		_say("Pearls come later: earn $%s in this tank first." % Data.fmt(Data.PEARL_UNIT * 0.25))
+		return
+	shop_popup.visible = false
+	pearl_card.toggle()
+	if pearl_card.visible:
+		_refresh_pearls()
+
+
+func _perk_effect(key: String, lv: int) -> String:
+	match key:
+		"lucky":
+			return "+%d%% coins" % (25 * lv)
+		"start":
+			return "start with $%s" % Data.fmt(Data.START_MONEY + Data.HEAD_START[lv])
+		"learn":
+			return "levels +%d%% faster" % (25 * lv)
+		"friends":
+			return "bring %d fish" % (1 + lv)
+		"room":
+			return "+%d room" % (2 * lv)
+		"habits":
+			return "Snail %d, Feeder %d" % [mini(lv, int(Data.UPGRADES.snail.max)), lv]
+		"pantry":
+			return "food kept" if lv > 0 else "food lost"
+	return ""
+
+
+func _refresh_pearls() -> void:
+	var gain := Data.pearls_for(run_earned, upgrades.diver)
+	var rows := []
+	for k in Data.PERK_ORDER:
+		var lv: int = perks[k]
+		var mx := Data.perk_max(k)
+		var p: Dictionary = Data.PERKS[k]
+		var text: String
+		var cost := Data.perk_cost(k, lv)
+		if lv >= mx:
+			text = "%s  MAX  (%s)" % [p.name, _perk_effect(k, lv)]
+		elif compact:
+			text = "%s %d  %dp" % [p.name, lv, cost]
+		else:
+			text = "%s  lv%d  ->  %s   %d pearls" % [p.name, lv, _perk_effect(k, lv + 1), cost]
+		rows.append({"key": k, "text": text, "disabled": lv >= mx or pearls < cost,
+			"tooltip": "%s\nNow: %s" % [p.desc, _perk_effect(k, lv) if lv > 0 else "none"]})
+	var move_text: String
+	if gain > 0:
+		move_text = "This tank has earned $%s. Moving now gives you +%d pearls (the next one at $%s earned)." % [
+			Data.fmt(run_earned), gain, Data.fmt(Data.next_pearl_at(run_earned))]
+	else:
+		move_text = "This tank has earned $%s. Your first pearl comes at $%s earned." % [
+			Data.fmt(run_earned), Data.fmt(Data.next_pearl_at(run_earned))]
+	move_text += "\nYou keep pearls, perks and stats. Coins, fish, upgrades, food and grime start over."
+	var cands := []
+	for f in tank.fishes:
+		if f.dead or f.fry or f.nickname == "" or not Data.KEEPABLE.has(f.species):
+			continue
+		cands.append({"fish": f, "text": "%s  lv%d" % [fish_title(f), f.level], "color": Data.SPECIES[f.species].color})
+	pearl_card.update({
+		"title": "-- %d pearls --" % pearls,
+		"summary": "Pearls buy perks that last in every tank. You get them by moving to a new tank: the more this tank earned, the more pearls.%s" % (
+			"" if moves == 0 else " Moves so far: %d." % moves),
+		"perks": rows,
+		"move_text": move_text,
+		"can_move": gain > 0,
+		"move_button": "Move to a new tank  (+%d pearls)" % gain if gain > 0 else "Not enough earned yet",
+		"keep_text": "Bring along (%d of %d): named Guppies, Dawas, Classics and Angels can come.",
+		"keep_text_none": "Name a Guppy, Dawa, Classic or Angel (right-click it) to bring it along.",
+		"candidates": cands,
+		"max_keep": 1 + int(perks.friends),
+	})
+
+
+func _buy_perk(key: String) -> void:
+	var lv: int = perks[key]
+	if lv >= Data.perk_max(key):
+		return
+	var cost := Data.perk_cost(key, lv)
+	if pearls < cost:
+		return
+	pearls -= cost
+	perks[key] = lv + 1
+	audio.play("level")
+	_say("%s: %s." % [Data.PERKS[key].name, _perk_effect(key, lv + 1)])
+	_apply_upgrades()
+	_save_game()
+	_refresh()
+
+
+func _move_tank(kept: Array) -> void:
+	var gain := Data.pearls_for(run_earned, upgrades.diver)
+	if gain <= 0:
+		return
+	_save_game()
+	_backup_save("before-move")
+	var bring := []
+	for f in kept:
+		if tank.fishes.has(f) and not f.dead and not f.fry and f.nickname != "" and Data.KEEPABLE.has(f.species):
+			bring.append({"s": f.species, "lv": f.level, "xp": f.xp, "n": f.nickname})
+	bring = bring.slice(0, 1 + int(perks.friends))
+	var food: Dictionary = tank.food_stock.duplicate()
+	pearls += gain
+	moves += 1
+	stats.moves = int(stats.get("moves", 0)) + 1
+	money = Data.START_MONEY + Data.HEAD_START[int(perks.start)]
+	run_earned = 0.0
+	unlocked = 1
+	for k in upgrades:
+		upgrades[k] = 0
+	upgrades.snail = mini(int(perks.habits), int(Data.UPGRADES.snail.max))
+	upgrades.feeder = int(perks.habits)
+	_undo = {}
+	medicine = 0
+	_dirt_stage = 0
+	tank.set_clean_mode(false)
+	tank.reset()
+	if perks.pantry > 0:
+		for k in food:
+			tank.food_stock[k] = mini(int(food[k]), food_cap())
+	else:
+		food_seen.clear()
+	_apply_upgrades()
+	for b in bring:
+		var f = tank.add_fish(int(b.s), int(b.lv), int(b.xp), 0.2, true)
+		f.nickname = b.n
+		var pos := Data.CHAIN.find(f.species)
+		if pos >= 0:
+			unlocked = maxi(unlocked, mini(pos + 1, Data.CHAIN.size() - 1))
+	if bring.is_empty():
+		tank.add_fish(0, 0, 0, 0.3, true)
+	pearl_card.hide()
+	audio.play("level")
+	_save_game()
+	var names := ", ".join(bring.map(func(b): return b.n))
+	_queue_card("-- a new tank! --", "You moved to a new tank and got %d pearls (%d now).\n%s\nSpend pearls on perks with O." % [
+		gain, pearls, ("%s came along." % names) if names != "" else "A guppy is waiting for you."])
+	_refresh()
+
+
 # ---------------------------------------------------------------- medicine
 
 # About a third of the price of the best fish you keep, so it always stings.
@@ -652,6 +828,12 @@ func _species_note(i: int, prefix := "") -> String:
 		return prefix + "Doesn't eat. Stroke it with the mouse to pat it."
 	if sp.get("drifter", false):
 		return prefix + "Eats only plankton. Pulses up and sinks slowly."
+	if sp.get("upright", false):
+		return prefix + "Eats only krill ~. Bobs along upright."
+	if sp.get("shift", false):
+		return prefix + "Eats only krill ~. Crawls over the sand, slowly changing color."
+	if sp.has("glow"):
+		return prefix + "Eats only krill ~. The lure on its head glows."
 	var k := Data.food_of(i)
 	if Data.PAID_FOODS.has(k):
 		var low := " Glides low over the sand." if sp.get("bottom", false) else ""
@@ -726,6 +908,7 @@ func _undo_sell() -> void:
 func _on_money(amount: float, coins: int, by_snail: bool) -> void:
 	money += amount
 	lifetime += amount
+	run_earned += amount
 	if by_snail:
 		stats.earned_snails += amount
 		stats.coins_snails += coins
@@ -740,6 +923,8 @@ func _next_goal() -> Dictionary:
 	if tank.room_used() < capacity():
 		for p in range(min(unlocked, Data.CHAIN.size() - 1) + 1):
 			var i: int = Data.CHAIN[p]
+			if moves < Data.needs_moves(i):
+				continue
 			var c := fish_cost(i)
 			if c > money and (best.is_empty() or c < best.cost):
 				best = {"name": Data.SPECIES[i].name, "cost": c}
@@ -1017,6 +1202,8 @@ func _build_ui() -> void:
 		upgrade_buttons[key] = b
 	medicine_button = _make_button("", _buy_medicine)
 	up_flow.add_child(medicine_button)
+	pearl_button = _make_button("", _toggle_pearls)
+	up_flow.add_child(pearl_button)
 
 	# Shop pop-up used in compact mode: covers the bottom of the tank.
 	shop_popup = PanelContainer.new()
@@ -1075,6 +1262,11 @@ func _build_ui() -> void:
 		fish_list.hide()
 		_open_fish_card(f))
 	add_child(fish_list)
+
+	pearl_card = PearlCard.new()
+	pearl_card.perk_requested.connect(_buy_perk)
+	pearl_card.move_requested.connect(_move_tank)
+	add_child(pearl_card)
 
 	help_card = HelpCard.new()
 	help_card.tips_reset_requested.connect(_reset_tips)
@@ -1557,6 +1749,11 @@ func _reset_game() -> void:
 	tips_seen.clear()
 	money = Data.START_MONEY
 	lifetime = 0.0
+	run_earned = 0.0
+	pearls = 0
+	moves = 0
+	for k in perks:
+		perks[k] = 0
 	unlocked = 1
 	for k in upgrades:
 		upgrades[k] = 0
@@ -1723,6 +1920,8 @@ func _refresh() -> void:
 
 	if fish_list.visible:
 		_refresh_fish_list()
+	if pearl_card.visible:
+		_refresh_pearls()
 
 	if tip_box.visible:
 		tip_label.custom_minimum_size.x = min(520.0, size.x - (36.0 if compact else 80.0))
@@ -1795,6 +1994,17 @@ func _refresh_shop(rate: float) -> void:
 		var pos := Data.CHAIN.find(i)
 		if pos < 0:
 			b.visible = settings.values.dirt
+		var need := Data.needs_moves(i)
+		if need > 0:
+			# Prestige fish: hidden until you've moved once; the next locked one
+			# shows how many moves it takes.
+			b.visible = moves >= need or (moves > 0 and need == _next_prestige_fish_moves())
+			if moves < need:
+				b.text = ("??? %d moves" if compact else "???  after %d moves") % need
+				b.tooltip_text = "A new kind of fish, only for tanks you've moved to %d times (O)." % need
+				b.disabled = true
+				_mark_affordable(b)
+				continue
 		# The pop-up shop uses short labels so 2-3 buttons fit per row;
 		# the tooltip has the full details.
 		if pos > unlocked:
@@ -1834,6 +2044,13 @@ func _refresh_shop(rate: float) -> void:
 	for key in ["sponge", "filter", "uv"]:
 		upgrade_buttons[key].visible = settings.values.dirt
 	upgrade_buttons.hatchery.visible = Data.CHAIN.find(Data.SHARK) <= unlocked or upgrades.hatchery > 0
+	upgrade_buttons.reef.visible = Data.CHAIN.find(4) <= unlocked or upgrades.reef > 0 or moves > 0
+	upgrade_buttons.diver.visible = _pearls_known()
+	pearl_button.visible = _pearls_known()
+	var gain := Data.pearls_for(run_earned, upgrades.diver)
+	pearl_button.text = ("Pearls %d" if compact else "Pearls (O)  %d") % pearls + (("  +%d" % gain) if gain > 0 else "")
+	pearl_button.tooltip_text = "Spend pearls on perks that last forever, or move to a new tank for more pearls."
+	_mark_affordable(pearl_button)
 	medicine_button.visible = settings.values.dirt
 
 
@@ -1966,6 +2183,10 @@ func _save_game() -> void:
 		"lifetime": lifetime,
 		"unlocked": unlocked,
 		"chain": Data.CHAIN_VERSION,
+		"pearls": pearls,
+		"perks": perks,
+		"moves": moves,
+		"run_earned": run_earned,
 		"upgrades": upgrades,
 		"fish": tank.serialize_fish(),
 		"tips": tips_seen.keys(),
@@ -1993,6 +2214,14 @@ func _load_game(skip_offline := false) -> bool:
 		return false
 	money = float(d.get("money", Data.START_MONEY))
 	lifetime = float(d.get("lifetime", 0.0))
+	# Saves from before prestige: everything earned so far counts toward the
+	# first move.
+	run_earned = float(d.get("run_earned", lifetime))
+	pearls = maxi(0, int(d.get("pearls", 0)))
+	moves = maxi(0, int(d.get("moves", 0)))
+	var pk = d.get("perks", {})
+	for k in Data.PERK_ORDER:
+		perks[k] = clampi(int(pk.get(k, 0)), 0, Data.perk_max(k)) if typeof(pk) == TYPE_DICTIONARY else 0
 	unlocked = int(d.get("unlocked", 1))
 	if int(d.get("chain", 1)) < Data.CHAIN_VERSION:
 		# Older saves count along the old unlock order: find the same fish
@@ -2170,6 +2399,7 @@ func _offline_earnings(secs: float) -> void:
 	earned = floor(earned * collect * dirt_mult / maxf(0.01, tank.water_mult()))
 	money += earned
 	lifetime += earned
+	run_earned += earned
 	stats.earned_offline += earned
 	if earned <= 0.0:
 		_say("Welcome back! You were away %s." % Data.fmt_time(secs))
@@ -2251,6 +2481,8 @@ func _show_stats() -> void:
 		row.call("  by you", "$" + Data.fmt(stats.earned_you)),
 		row.call("  by snails", "$" + Data.fmt(stats.earned_snails)),
 		row.call("  while away", "$" + Data.fmt(stats.earned_offline)),
+		row.call("This tank", "$" + Data.fmt(run_earned)),
+		row.call("Pearls", "%d  (moves: %d)" % [pearls, moves]),
 		row.call("Coins clicked", str(int(stats.coins_you))),
 		row.call("Snail coins", str(int(stats.coins_snails))),
 		row.call("Most money", "$" + Data.fmt(stats.best_money)),
@@ -2344,6 +2576,11 @@ func import_save(path: String) -> bool:
 	f.close()
 	money = Data.START_MONEY
 	lifetime = 0.0
+	run_earned = 0.0
+	pearls = 0
+	moves = 0
+	for k in perks:
+		perks[k] = 0
 	unlocked = 1
 	for k in upgrades:
 		upgrades[k] = 0

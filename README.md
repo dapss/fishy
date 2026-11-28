@@ -33,7 +33,7 @@ From v0.2.0 on, fishy checks GitHub for a new version a few seconds after launch
 ## Features
 
 - Character-grid ASCII aquarium with animated swimming, blinking eyes, drifting bubbles, rising floating text, seaweed, snails, and a tiny castle.
-- Ten fish species to collect, from Guppy (`><'>`) to Shark, each with its own sprite, speed, coin interval, and XP leveling up to level 5. Sharks hunt guppies instead of eating pellets, and algae eaters graze grime off the glass.
+- Thirteen fish species to collect, from Guppy (`><'>`) to Anglerfish, each with its own sprite, speed, coin interval, and XP leveling up to level 5. Sharks hunt guppies instead of eating pellets, and algae eaters graze grime off the glass.
 - Desktop widget mode with borderless window, always-on-top pinning, experimental transparent background, size presets, and corner/edge snapping.
 - Compact layout with a pop-up shop and responsive font scaling so the tank stays readable in small windows down to `360x240`.
 - Code-synthesized sound effects (coins, food, splashes, level-ups, purchases, sales, pats, chomps, sponge squeaks) with volume control and one-key mute.
@@ -63,7 +63,7 @@ Your tank keeps earning while the game is closed, up to 12 hours per session. Wi
 fishy is paced as an idle game: the first fish come within minutes, but the later ones take hours and then days to save up for, and each extra fish of a kind costs more than the last (15% more for the cheap ones, up to 27% more for sharks).
 
 <details>
-<summary>Fish species (10)</summary>
+<summary>Fish species (13)</summary>
 
 | Species | Sprite | Cost | Base coin | Interval |
 |---|---|---:|---:|---:|
@@ -77,12 +77,17 @@ fishy is paced as an idle game: the first fish come within minutes, but the late
 | Jellyfish | `(o.o)` | $500M | $13,000 | 14s |
 | Shark | `` >=|||  o`-. `` | $12B | $50,000 | 12s |
 | Algae eater | `=<(##)o` | $400 | $3 | 8s |
+| Seahorse | `(o>=` | $300B | $180,000 | 12s |
+| Octopus | `(o  o)` | $8T | $700,000 | 13s |
+| Anglerfish | `><(  O \|vv` | $200T | $2.8M | 14s |
 
 Each species unlocks once you buy the one before it. The algae eater is always in the shop while dirt is on.
 
 **Sharks** don't eat pellets: a hungry shark chases the nearest guppy and eats it, and nearby guppies try to dart away. Named guppies are never eaten. A guppy keeps a shark full for about three minutes. With no guppies, a shark goes hungry and stops dropping coins when starving. The auto-feeder doesn't feed sharks, but the **Guppy hatchery** does: it hatches pale little guppy fry for them to hunt. Fry don't take up room in the tank and don't make coins.
 
 **Stingrays** glide low over the sand, slowly flapping their wings. **Bettas** trail long rippling fins.
+
+**Seahorses**, **octopuses** and **anglerfish** only come to tanks you've moved to (see [Pearls and New Tanks](#pearls-and-new-tanks)): the Seahorse after your 1st move, the Octopus after your 3rd and the Anglerfish after your 6th. Seahorses bob along upright, octopuses crawl over the sand slowly changing color, and the anglerfish's lure glows. All three eat krill.
 
 **Jellyfish** don't swim: they pulse up in quick squeezes and sink slowly in between, drifting toward food rather than chasing it.
 
@@ -98,6 +103,7 @@ Each species unlocks once you buy the one before it. The algae eater is always i
 | Pellets | `•` | Classic, Angel, Betta | Packs of 20, $30 each |
 | Shrimp | `c` | Puffer, Stingray | Packs of 10, $500 each |
 | Plankton | `°` | Jellyfish | Packs of 10, $8,000 each |
+| Krill | `~` | Seahorse, Octopus, Anglerfish | Packs of 10, $150,000 each |
 
 Prices grow with your coin multiplier (Minerals, Seaweed, Castle), so food stays a small share of what a fish earns between meals. Fish ignore food that isn't theirs. The first fish that needs a new food comes with a free pack.
 
@@ -110,7 +116,7 @@ Prices grow with your coin multiplier (Minerals, Seaweed, Castle), so food stays
 - **Treats**, priced at two minutes of your income: Gourmet treat (double XP for 10 minutes) and Golden flakes (coins x1.5 for 5 minutes).
 
 <details>
-<summary>Upgrades (11)</summary>
+<summary>Upgrades (13)</summary>
 
 | Upgrade | Base cost | Max level | Effect |
 |---|---:|---:|---|
@@ -119,6 +125,8 @@ Prices grow with your coin multiplier (Minerals, Seaweed, Castle), so food stays
 | Minerals | $300 | 10 | Multiplies coin value by x1.25 per level |
 | Bigger tank | $150 | 8 | Adds room for 2 more fish per level |
 | Guppy hatchery | $2B | 8 | Hatches guppy fry for your sharks, faster each level (shows up once you discover the Shark) |
+| Coral reef | $1M | 60 | +10% coin value per level; keeps going long after the rest is maxed |
+| Pearl diver | $100M | 40 | +10% pearls when you move to a new tank, per level |
 | Seaweed `)(` | $50 | 8 | +5% coin value per plant |
 | Castle `[~]` | $5,000 | 1 | +25% coin value |
 | Big sponge | $150 | 3 | +20% reach, +10% scrubbing strength and +50% grime held per level |
@@ -129,6 +137,26 @@ Prices grow with your coin multiplier (Minerals, Seaweed, Castle), so food stays
 Filter and UV lamp together slow grime by at most 50%. **Fish Medicine** is a consumable in the same shop, priced at about a third of your best fish.
 
 </details>
+
+## Pearls and New Tanks
+
+Once a tank has earned $1B, you can **move to a new tank** (press `O`, or the Pearls button in the shop). You start over with a guppy and a bit of money, and get **pearls**: the square root of what the tank earned, in billions (so $1B gives 1 pearl, $100B gives 10, $1T gives 31). The Pearl diver upgrade adds 10% per level. Your first move counts everything you earned before pearls existed.
+
+New tanks also bring new fish: the Seahorse after your 1st move, the Octopus after your 3rd and the Anglerfish after your 6th.
+
+Pearls buy perks that last in every tank from then on:
+
+| Perk | Cost (pearls) | Effect |
+|---|---|---|
+| Lucky water | 2, 4, 6, ... | +25% coin value per level, no limit |
+| Head start | 2, 5, 10, 20 | Start each tank with $515, $20K, $2M, then $200M |
+| Quick learners | 3, 6, 9, 12 | Fish level up 25% faster per level |
+| Old friends | 3, 6, 12, 24 | Bring one more named fish along per level |
+| Roomy tank | 5, 10, 20, 40 | Room for 2 more fish per level |
+| Old habits | 3, 6, 12 | New tanks start with a Snail and the Auto-feeder at this level |
+| Pantry | 4 | Keep your food stock when you move |
+
+You keep pearls, perks, stats and settings, plus one named fish (more with Old friends). Only small fish fit in the move: a named Guppy, Dawa, Classic or Angel, with its level. Everything else starts over: coins, the other fish, upgrades, food and grime. Your save is backed up before every move.
 
 ## Dirty Tanks
 
@@ -188,6 +216,7 @@ Optional settings for running all day:
 | `Q` | What a click drops: auto, or a food |
 | `Space` | Collect all coins |
 | `L` | Open fish list |
+| `O` | Pearls and moving to a new tank |
 | `S` | Toggle shop pop-up (compact layout) |
 | `C` | Toggle compact / full layout |
 | `P` | Pin or unpin always on top |

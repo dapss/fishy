@@ -9,12 +9,13 @@ const SECTIONS := [
 	["HOW TO PLAY", [
 		"Fish drop $ coins that sink to the sand. Click a coin, or drag across coins, to collect them.",
 		"Fish get hungry over time ( ? above them). Click the water to drop food. Starving fish ( ! ) stop dropping coins.",
-		"Each fish eats only its own food: flakes * (free), pellets \u2022, shrimp c, plankton \u00b0 (buy them in the shop). A click drops what the hungriest fish nearby eats; the food bar (or Q) picks one yourself. The auto-feeder uses your stock.",
+		"Each fish eats only its own food: flakes * (free), pellets \u2022, shrimp c, plankton \u00b0, krill ~ (buy them in the shop). A click drops what the hungriest fish nearby eats; the food bar (or Q) picks one yourself. The auto-feeder uses your stock.",
 		"The Dawa doesn't eat: when it's lonely ( ... ), move the mouse back and forth over it to pat it. Keep patting a fully happy Dawa until the hearts above it fill up (about 20 seconds) and it gets super happy: coins twice as often for a minute, then 5 minutes before it can happen again. Algae eaters eat only grime.",
 		"Fed fish gain XP and level up (max 5). Higher levels drop bigger coins.",
 		"Spend coins in the shop on more fish and upgrades. A snail collects coins for you, the auto-feeder feeds for you.",
 		"Sharks don't eat pellets: a hungry shark hunts guppies. Name a guppy to keep it safe. The Guppy hatchery hatches fry for them, also while the game is closed.",
 		"Your fish keep earning while the game is closed.",
+		"Pearls (O): once a tank has earned $1B, you can move to a new tank. You start over, but get pearls (more the more the tank earned) to spend on perks that last forever. Named Guppies, Dawas, Classics and Angels can come along. Some fish only come to tanks you've moved to.",
 		"The glass gets dirty over time. Dirty water earns less, then makes fish sick ( ~ ), then costs them levels. Left fully covered, fish start to die.",
 		"Clean mode (W): hold the left button and scrub. Slow strokes clean best, fast ones just smear. A grimy sponge cleans badly: right-click to rinse it. Scrub it spotless for +25% coins for a while.",
 		"A dead fish can be revived with Fish Medicine within 5 minutes of play (clean the tank first), or flushed. Medicine also cures sick fish. Algae eater fish graze grime off the glass; a filter and a UV lamp slow it down.",
@@ -30,6 +31,7 @@ const SECTIONS := [
 	["KEYS", [
 		"Esc  settings        F1  this help",
 		"S    shop            L   fish list",
+		"O    pearls and moving to a new tank",
 		"1-0  buy fish        F   feed every hungry fish",
 		"Q    what clicks drop (auto / a food)",
 		"Space  collect all coins",

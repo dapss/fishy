@@ -103,6 +103,7 @@ class Fish extends RefCounted:
 	var grazed: Array = []    # algae eater: spots it just finished, {p, t}, to skip for a while
 	var graze_face := 0       # algae eater: which way to face at its target (mouth to the grime)
 	var fry := false          # hatchery guppy: shark food. Takes no room, makes no coins, isn't saved
+	var xp_extra := 0.0       # Quick learners: fractions of an XP point saved up
 
 
 var font: Font
@@ -137,6 +138,7 @@ var motes: Array = []     # {pos, vel}
 var coin_mult := 1.0
 var feeder_level := 0
 var hatchery_level := 0           # Guppy hatchery upgrade
+var learn_level := 0              # Quick learners perk: +25% XP per level
 var _hatch_timer := 0.0
 var has_castle := false
 var transparent_outside := false   # don't paint the area around the glass
@@ -697,7 +699,8 @@ func _update_fish(dt: float) -> void:
 		elif dist > 0.01:
 			# Fish move mostly sideways; vertical movement is slower.
 			var step: Vector2 = dir / dist * minf(dist, spd * dt)
-			step.y *= 0.6
+			if not sp.get("upright", false):
+				step.y *= 0.6
 			f.pos += step
 			f.anim += step.length() * 0.9     # tail wags with distance swum
 			if abs(dir.x) > 0.3:
@@ -989,7 +992,12 @@ func _explode(at: Vector2, hue: float) -> void:
 func _gain_xp(f: Fish) -> void:
 	if f.level >= Data.MAX_LEVEL or f.sick:
 		return
-	f.xp += 2 if gourmet_time > 0.0 else 1
+	var gain := 2 if gourmet_time > 0.0 else 1
+	f.xp_extra += 0.25 * learn_level * gain
+	while f.xp_extra >= 1.0:
+		f.xp_extra -= 1.0
+		gain += 1
+	f.xp += gain
 	if f.xp >= Data.xp_needed(f.level):
 		f.xp = 0
 		f.level += 1
@@ -1841,8 +1849,17 @@ func _draw_fish(f: Fish) -> void:
 	elif f.hunger > 0.7:
 		dim = 0.3
 	var gray := Color("555c66")
+	if sp.get("shift", false) and f.super_time <= 0.0:
+		# Slowly drifts through warm colors, like a real octopus changing its skin.
+		var hue := fmod(body.h + sin(time * 0.25 + f.phase) * 0.08 + 1.0, 1.0)
+		body = Color.from_hsv(hue, body.s, body.v)
+		accent = Color.from_hsv(fmod(hue - 0.03 + 1.0, 1.0), accent.s, accent.v)
+	var glow: Color = sp.get("glow", eye)
+	if sp.has("glow"):
+		glow = glow.lerp(Color("ffffff"), 0.5 + 0.5 * sin(time * 3.0 + f.phase))
+		glow.a = 0.65 + 0.35 * sin(time * 3.0 + f.phase)
 	var palette := {
-		" ": body, "a": accent, "d": body.darkened(0.4), "l": body.lightened(0.35), "e": eye,
+		" ": body, "a": accent, "d": body.darkened(0.4), "l": body.lightened(0.35), "e": eye, "g": glow,
 	}
 	for key in palette:
 		var c: Color = palette[key]
