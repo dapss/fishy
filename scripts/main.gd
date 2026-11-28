@@ -1420,6 +1420,8 @@ func _tab_shown(t: String) -> bool:
 func _set_shop_tab(t: String) -> void:
 	shop_tab = t
 	_show_shop_tab()
+	shop_scroll.scroll_vertical = 0
+	shop_full_scroll.scroll_vertical = 0
 	_refresh()
 	# After the new tab has laid out, so its height is known.
 	_fit_popups.call_deferred()
@@ -2197,6 +2199,7 @@ func _refresh_shop(rate: float) -> void:
 		var b: Button = upgrade_buttons[key]
 		var u: Dictionary = Data.UPGRADES[key]
 		var lv: int = upgrades[key]
+		b.visible = true          # the checks below hide what doesn't apply
 		b.tooltip_text = _upgrade_tooltip(key, rate)
 		var label: String = u.short if compact else u.name
 		if lv >= int(u.max):
